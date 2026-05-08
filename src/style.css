@@ -213,6 +213,9 @@ html, body {
   touch-action: auto;
 }
 
+/* .drawer{display:flex} overrides UA [hidden]{display:none}; restore explicitly */
+.drawer[hidden] { display: none; }
+
 .drawer-head {
   display: flex;
   justify-content: space-between;
