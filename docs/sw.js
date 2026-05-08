@@ -1,7 +1,7 @@
 // Minimal service worker: cache the app-shell so the PWA opens offline.
 // Audio (Freesound previews) is intentionally NOT cached — that's a follow-up AP.
 
-const VERSION = 'toender-shell-v1';
+const VERSION = 'toender-shell-v3';
 const SHELL = [
   './',
   './index.html',

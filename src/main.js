@@ -54,9 +54,14 @@ function readSettingsFromForm() {
 }
 
 async function refreshStats() {
-  const stats = await getStats(get('theme'));
-  set('stats', stats);
-  $('stats').textContent = `neu ${stats.neu} | gut ${stats.gut} | stern ${stats.stern} | mittel ${stats.mittel} | raus ${stats.raus}`;
+  try {
+    const stats = await getStats(get('theme'));
+    set('stats', stats);
+    $('stats').textContent = `neu ${stats.neu} | gut ${stats.gut} | stern ${stats.stern} | mittel ${stats.mittel} | raus ${stats.raus}`;
+  } catch (err) {
+    console.warn('refreshStats failed:', err);
+    $('stats').textContent = '-';
+  }
 }
 
 async function loadMore() {
@@ -243,28 +248,39 @@ function wireThemeName() {
 }
 
 function wireServiceWorker() {
+  // Service worker disabled in Stufe 1 — caching surface caused stale-cache pain.
+  // Unregister any existing SW from earlier deploys so users get fresh assets.
   if (!('serviceWorker' in navigator)) return;
-  if (location.hostname === 'localhost') return; // skip in dev
-  navigator.serviceWorker.register('./sw.js').catch((err) => console.warn('SW failed:', err));
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.forEach((r) => r.unregister()))
+    .catch(() => {});
+  if ('caches' in window) {
+    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
+  }
 }
 
 async function boot() {
-  loadSettings();
-  applySettingsToForm();
-  wireDrawers();
-  wireFxControls();
-  wireVoteButtons();
-  wireThemeName();
-  wireServiceWorker();
-  await refreshStats();
+  try {
+    loadSettings();
+    applySettingsToForm();
+    wireDrawers();
+    wireFxControls();
+    wireVoteButtons();
+    wireThemeName();
+    wireServiceWorker();
 
-  const s = get('settings');
-  if (!s.freesoundKey) {
-    $('settings-drawer').hidden = false;
-    showToast('Erstes Mal: Freesound API-Key in Setup eingeben.');
-  } else {
-    await loadMore();
-    showNext();
+    const s = get('settings');
+    if (!s.freesoundKey) {
+      $('settings-drawer').hidden = false;
+      showToast('Setup: Freesound API-Key + GitHub-Token eingeben.');
+    } else {
+      await loadMore();
+      showNext();
+    }
+    await refreshStats();
+  } catch (err) {
+    console.error('Boot failed:', err);
+    document.body.innerHTML = `<pre style="color:#fff;padding:1rem;white-space:pre-wrap">Fehler beim Start:\n${err.message}\n\n${err.stack ?? ''}</pre>`;
   }
 }
 
