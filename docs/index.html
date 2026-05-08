@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#1a1a1a" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <title>Toender</title>
+    <script type="module" crossorigin src="/toender/assets/index-Cvjf6co3.js"></script>
+    <link rel="stylesheet" crossorigin href="/toender/assets/index-C3nzIRpY.css">
+  </head>
+  <body>
+    <div id="app">
+      <header id="header">
+        <div class="theme-name" id="theme-name">Kiesel</div>
+        <div class="header-actions">
+          <button id="btn-detail" class="icon-btn" title="Detail">FX</button>
+          <button id="btn-settings" class="icon-btn" title="Einstellungen">Setup</button>
+        </div>
+      </header>
+
+      <main id="stage">
+        <div id="card-stack"></div>
+        <div id="empty-state" hidden>
+          <p>Keine Samples geladen.</p>
+          <p class="hint">Setup oeffnen und Freesound-API-Key eingeben.</p>
+        </div>
+      </main>
+
+      <footer id="actions">
+        <button class="vote-btn vote-out"   data-vote="raus"   title="Raus (Links)">x</button>
+        <button class="vote-btn vote-mid"   data-vote="mittel" title="Mittel (Unten)">~</button>
+        <button class="vote-btn vote-good"  data-vote="gut"    title="Gut (Rechts)">+</button>
+        <button class="vote-btn vote-star"  data-vote="stern"  title="Stern (Oben)">*</button>
+      </footer>
+
+      <div id="settings-drawer" class="drawer" hidden>
+        <div class="drawer-head">
+          <h2>Einstellungen</h2>
+          <button class="icon-btn" id="settings-close">x</button>
+        </div>
+        <div class="drawer-body">
+          <label>Freesound API-Key
+            <input type="text" id="freesound-key" autocomplete="off" />
+          </label>
+          <label>GitHub Token (Stern-Sync)
+            <input type="password" id="github-token" autocomplete="off" />
+          </label>
+          <label>GitHub Repo (owner/name)
+            <input type="text" id="github-repo" placeholder="Urlaubert/toender" autocomplete="off" />
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="loudness-normalize" checked />
+            Loudness-Normalize (-3 dBFS)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="license-publishable" checked />
+            Nur veroeffentlichbare Lizenzen
+          </label>
+          <label>Theme
+            <select id="theme-select">
+              <option value="kiesel">Kiesel</option>
+            </select>
+          </label>
+          <hr />
+          <p class="hint">
+            Status-Counts: <span id="stats">-</span>
+          </p>
+          <button id="btn-reload" class="primary">Samples neu laden</button>
+        </div>
+      </div>
+
+      <div id="detail-drawer" class="drawer" hidden>
+        <div class="drawer-head">
+          <h2 id="detail-title">Detail</h2>
+          <button class="icon-btn" id="detail-close">x</button>
+        </div>
+        <div class="drawer-body">
+          <div id="waveform"></div>
+          <div class="fx-controls">
+            <label>Pitch (Halbtoene)
+              <input type="range" id="fx-pitch" min="-12" max="12" step="1" value="0" />
+              <output id="fx-pitch-out">0</output>
+            </label>
+            <label>Speed
+              <input type="range" id="fx-speed" min="0.25" max="4" step="0.05" value="1" />
+              <output id="fx-speed-out">1.00</output>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="fx-reverse" />
+              Reverse
+            </label>
+            <label>Highpass
+              <select id="fx-highpass">
+                <option value="0">aus</option>
+                <option value="80">80 Hz</option>
+                <option value="200">200 Hz</option>
+                <option value="500">500 Hz</option>
+              </select>
+            </label>
+            <label>Trim Start (s)
+              <input type="number" id="fx-trim-start" min="0" step="0.05" value="0" />
+            </label>
+            <label>Trim Ende (s)
+              <input type="number" id="fx-trim-end" min="0" step="0.05" value="0" />
+              <span class="hint">0 = Sample-Ende</span>
+            </label>
+          </div>
+          <div class="detail-meta" id="detail-meta"></div>
+        </div>
+      </div>
+
+      <div id="toast" hidden></div>
+    </div>
+
+  </body>
+</html>
