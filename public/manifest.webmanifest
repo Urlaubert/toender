@@ -1,7 +1,7 @@
 {
-  "name": "Toender",
-  "short_name": "Toender",
-  "description": "Audition-Triage fuer Samples",
+  "name": "toender",
+  "short_name": "toender",
+  "description": "",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
