@@ -2,9 +2,14 @@
 
 const target = new EventTarget();
 const data = {
+  view: 'audition',     // 'themes' | 'audition' | 'behalten' | 'du'
   theme: 'kiesel',
-  queue: [],          // Array of sample objects pending audition
-  current: null,      // Currently displayed sample
+  queue: [],            // Array of sample objects pending audition
+  current: null,        // Currently displayed sample
+  lastVote: null,       // { sampleId, prevStatus } for Undo
+  stackFilter: 'neu',   // 'neu' | 'mittel' | 'all'
+  behaltenFilter: 'all',// 'all' | 'stern' | 'gut' | 'mittel'
+  behaltenSearch: '',
   busy: false,
   settings: {
     freesoundKey: '',

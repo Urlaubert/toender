@@ -64,6 +64,37 @@ async function putFile({ token, repo, path, contentBase64, message }) {
   return res.json();
 }
 
+// Loescht ein gesterntes Sample aus dem Repo (audio + meta).
+export async function deleteStarSample({ token, repo, sample }) {
+  if (!token) throw new Error('GitHub-Token fehlt');
+  if (!repo)  throw new Error('GitHub-Repo fehlt');
+
+  const ext = inferExtension(sample.audioUrl);
+  const safeName = sample.sourceId.replace(/[^a-z0-9_-]/gi, '');
+  const audioPath = `samples/kept/${sample.theme}/${sample.source}-${safeName}.${ext}`;
+  const metaPath  = `samples/kept/${sample.theme}/${sample.source}-${safeName}.json`;
+
+  async function deletePath(path) {
+    const head = await fetch(`${API}/repos/${repo}/contents/${path}`, { headers: authHeaders(token) });
+    if (head.status === 404) return;
+    if (!head.ok) throw new Error(`GitHub GET ${head.status}`);
+    const data = await head.json();
+    const res = await fetch(`${API}/repos/${repo}/contents/${path}`, {
+      method: 'DELETE',
+      headers: { ...authHeaders(token), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `toender: unstar ${sample.source}-${safeName}`, sha: data.sha, branch: 'main' }),
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      throw new Error(`GitHub DELETE ${res.status}: ${err.slice(0, 200)}`);
+    }
+  }
+
+  await deletePath(audioPath);
+  await deletePath(metaPath);
+  return { audioPath, metaPath };
+}
+
 export async function pushStarSample({ token, repo, sample }) {
   if (!token) throw new Error('GitHub-Token fehlt');
   if (!repo)  throw new Error('GitHub-Repo fehlt');

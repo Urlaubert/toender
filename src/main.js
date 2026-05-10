@@ -1,20 +1,37 @@
-// Entry point: load settings, wire up UI, manage queue + audition flow.
+// Entry point: load settings, wire up UI, manage tabs + audition flow.
 
 import './style.css';
 import { get, set, patch, on } from './state.js';
 import { getTheme, THEMES } from './themes.js';
 import { searchTheme } from './freesound.js';
-import { rememberSample, setStatus, getStats, getSample } from './memory.js';
-import { renderTopCard, onVote, setProgress, showToast } from './ui.js';
-import { loadSample, play, stop as audioStop, getPeakInfo, ensureContextResumed } from './audio.js';
-import { pushStarSample } from './github.js';
+import {
+  rememberSample, setStatus, getStats, getSample,
+  getKept, getMittelForReAudition,
+} from './memory.js';
+import {
+  renderTopCard, renderKeptList, renderThemesList,
+  onVote, onTapPad, onHoldStart, onHoldEnd, onWaveClick,
+  onKeptTap, onKeptLongPress,
+  setProgress, showToast, statusToFlyDir, flyOff,
+} from './ui.js';
+import {
+  loadSample, play, playFromOffset, setLoop, stop as audioStop,
+  getPeakInfo, getCurrentDuration, ensureContextResumed,
+} from './audio.js';
+import { pushStarSample, deleteStarSample } from './github.js';
 
 const SETTINGS_KEY = 'toender:settings';
 const TARGET_QUEUE = 20;
 const REFILL_THRESHOLD = 5;
+const UNDO_VISIBLE_MS = 3000;
 
 let currentCardEls = null;
 let isLoadingMore = false;
+let undoTimer = null;
+let currentKeptId = null;
+let activeActionSample = null;
+
+function $(id) { return document.getElementById(id); }
 
 function loadSettings() {
   try {
@@ -29,8 +46,6 @@ function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(get('settings')));
 }
 
-function $(id) { return document.getElementById(id); }
-
 function applySettingsToForm() {
   const s = get('settings');
   $('freesound-key').value = s.freesoundKey ?? '';
@@ -38,7 +53,6 @@ function applySettingsToForm() {
   $('github-repo').value = s.githubRepo ?? '';
   $('loudness-normalize').checked = !!s.loudnessNormalize;
   $('license-publishable').checked = !!s.licensePublishable;
-  $('theme-select').value = get('theme');
 }
 
 function readSettingsFromForm() {
@@ -49,64 +63,122 @@ function readSettingsFromForm() {
     loudnessNormalize: $('loudness-normalize').checked,
     licensePublishable: $('license-publishable').checked,
   });
-  set('theme', $('theme-select').value);
   saveSettings();
 }
 
+// ===== Tab-Routing =====
+
+function switchTab(name) {
+  set('view', name);
+  for (const view of document.querySelectorAll('.view')) {
+    view.hidden = view.dataset.view !== name;
+  }
+  for (const btn of document.querySelectorAll('.tab-btn')) {
+    btn.classList.toggle('active', btn.dataset.tab === name);
+  }
+  // Per-Tab-Render
+  audioStop();
+  setLoop(false);
+  currentKeptId = null;
+  if (name === 'behalten') refreshBehalten();
+  if (name === 'themes') refreshThemesList();
+  if (name === 'du') { applySettingsToForm(); refreshStats(); }
+  if (name === 'audition') {
+    // Auto-Play wieder anwerfen wenn current da ist
+    if (get('current')) playCurrent();
+  }
+}
+
+// ===== Stats =====
+
 async function refreshStats() {
   try {
-    const stats = await getStats(get('theme'));
-    set('stats', stats);
-    $('stats').textContent = `neu ${stats.neu} | gut ${stats.gut} | stern ${stats.stern} | mittel ${stats.mittel} | raus ${stats.raus}`;
+    const all = await getStats();
+    const ofTheme = await getStats(get('theme'));
+    const lines = [
+      `Theme ${get('theme')}:`,
+      `  neu ${ofTheme.neu}  gut ${ofTheme.gut}  stern ${ofTheme.stern}  mittel ${ofTheme.mittel}  raus ${ofTheme.raus}`,
+      ``,
+      `Alle Themes:`,
+      `  neu ${all.neu}  gut ${all.gut}  stern ${all.stern}  mittel ${all.mittel}  raus ${all.raus}`,
+    ];
+    $('stats').textContent = lines.join('\n');
+    set('stats', ofTheme);
   } catch (err) {
     console.warn('refreshStats failed:', err);
     $('stats').textContent = '-';
   }
 }
 
-async function loadMore() {
-  if (isLoadingMore) return;
+// ===== Audition: Queue laden =====
+
+async function loadMore({ filter = null, query = null } = {}) {
+  if (isLoadingMore) return [];
   const s = get('settings');
   if (!s.freesoundKey) {
-    showToast('Freesound API-Key fehlt — Setup oeffnen.');
-    return;
+    showToast('Freesound API-Key fehlt — Du-Tab oeffnen.');
+    return [];
   }
   isLoadingMore = true;
+  const themeKey = get('theme');
+  const theme = getTheme(themeKey);
+  const queries = query ? [query] : theme.queries;
+  const effectiveFilter = filter ?? get('stackFilter');
+
   try {
-    const themeKey = get('theme');
-    const theme = getTheme(themeKey);
     const fresh = await searchTheme({
       key: s.freesoundKey,
       theme: themeKey,
-      queries: theme.queries,
+      queries,
       durationMax: theme.durationMax,
       publishable: s.licensePublishable,
       target: TARGET_QUEUE,
     });
-    // Drop ones we've already audition'd in this theme
+
+    // Re-Anzeige als Marker statt Filter: nicht nur 'neu', sondern Status mit
+    // beruecksichtigen je nach Stack-Filter.
     const filtered = [];
     for (const f of fresh) {
       const existing = await getSample(f.id);
-      if (existing && existing.status !== 'neu') continue;
-      await rememberSample(f);
-      filtered.push(f);
+      // 'neu' = nur unbewertete
+      if (effectiveFilter === 'neu' && existing && existing.status !== 'neu') continue;
+      // 'mittel' = nur Mittel-Eimer
+      if (effectiveFilter === 'mittel' && (!existing || existing.status !== 'mittel')) continue;
+      // 'all' = alles
+      const merged = await rememberSample({
+        ...f,
+        // Wenn existing existiert, nimm dessen Status; sonst 'neu' aus Freesound.
+        status: existing?.status ?? f.status ?? 'neu',
+      });
+      filtered.push(merged);
     }
+
+    // Mittel-Re-Audition: zusaetzlich bestehende Mittel-Samples mit aufnehmen
+    // wenn der User explizit "Mittel re-audition" gewaehlt hat.
+    if (effectiveFilter === 'mittel') {
+      const mittels = await getMittelForReAudition(themeKey, TARGET_QUEUE);
+      for (const m of mittels) {
+        if (!filtered.some((x) => x.id === m.id)) filtered.push(m);
+      }
+    }
+
     set('queue', [...get('queue'), ...filtered]);
     if (filtered.length === 0) {
-      // API hat geantwortet, aber alles schon gehoert oder Filter zu eng.
-      showToast(`Keine neuen Samples — alle bereits bewertet oder Filter zu eng.`);
+      showToast(`Keine passenden Samples — Filter zu eng oder alle gehoert.`);
     } else {
-      showToast(`${filtered.length} neue Samples geladen.`);
+      showToast(`${filtered.length} Samples geladen.`);
     }
+    return filtered;
   } catch (err) {
     console.error(err);
     if (err.status === 401 || err.status === 403) {
-      showToast(`Freesound-Key ungueltig (HTTP ${err.status}) — Setup pruefen.`);
+      showToast(`Freesound-Key ungueltig (HTTP ${err.status}) — Du-Tab.`);
     } else if (err.status === 429) {
-      showToast(`Freesound-Limit erreicht (HTTP 429) — spaeter erneut.`);
+      showToast(`Freesound-Limit (HTTP 429) — spaeter nochmal.`);
     } else {
       showToast(`Fehler: ${err.message}`);
     }
+    return [];
   } finally {
     isLoadingMore = false;
   }
@@ -114,25 +186,35 @@ async function loadMore() {
 
 async function showNext() {
   audioStop();
+  setLoop(false);
   const queue = get('queue');
   if (queue.length === 0) {
     set('current', null);
-    $('empty-state').hidden = false;
-    $('card-stack').innerHTML = '';
+    await showEmptyStack();
     return;
   }
-  $('empty-state').hidden = true;
+  $('empty-stack').hidden = true;
+  $('onboarding').hidden = true;
+  $('card-stack').style.display = '';
+
   const sample = queue[0];
   set('queue', queue.slice(1));
   set('current', sample);
 
   currentCardEls = await renderTopCard($('card-stack'), sample, get('theme'));
+  updateStackCounter();
 
-  // Auto-play
+  await playCurrent();
+
+  if (get('queue').length < REFILL_THRESHOLD) loadMore();
+}
+
+async function playCurrent() {
+  const sample = get('current');
+  if (!sample?.audioUrl) return;
   try {
     await ensureContextResumed();
-    const detailContainer = $('waveform');
-    await loadSample(sample.audioUrl, detailContainer);
+    await loadSample(sample.audioUrl);
     const opts = collectFxOpts();
     play({ ...opts, onEnded: () => setProgress(currentCardEls?.progressBar, 1) });
     startProgressTracker(sample.duration);
@@ -140,9 +222,21 @@ async function showNext() {
     console.warn('Audio-Fehler:', err);
     showToast(`Audio-Fehler: ${err.message}`);
   }
+}
 
-  // Refill in background
-  if (get('queue').length < REFILL_THRESHOLD) loadMore();
+function updateStackCounter() {
+  const q = get('queue').length;
+  const cur = get('current') ? 1 : 0;
+  $('stack-counter').textContent = `${q + cur} im Stack`;
+}
+
+async function showEmptyStack() {
+  $('card-stack').innerHTML = '';
+  $('card-stack').style.display = 'none';
+  const stats = await getStats(get('theme'));
+  $('empty-stats').textContent =
+    `Theme "${get('theme')}": ${stats.stern} ★ · ${stats.gut} + · ${stats.mittel} ~ · ${stats.raus} x · ${stats.neu} neu.`;
+  $('empty-stack').hidden = false;
 }
 
 let progressInterval = null;
@@ -170,11 +264,18 @@ function collectFxOpts() {
   };
 }
 
+// ===== Vote + Undo =====
+
 async function handleVote(status) {
   const sample = get('current');
   if (!sample) return;
+
+  // Backup-Snapshot fuer Undo
+  set('lastVote', { sampleId: sample.id, prevStatus: sample.status ?? 'neu', sampleSnapshot: { ...sample } });
+
   await setStatus(sample.id, status);
 
+  // Wenn Stern + Sync moeglich: pushen
   if (status === 'stern') {
     const s = get('settings');
     if (s.githubToken && s.githubRepo) {
@@ -182,53 +283,348 @@ async function handleVote(status) {
         .then(({ audioPath }) => showToast(`Stern committet: ${audioPath}`))
         .catch((err) => showToast(`Stern-Sync fehlgeschlagen: ${err.message}`));
     } else {
-      showToast('Stern lokal — GitHub-Token/Repo fehlt fuer Sync.');
+      showToast('Stern lokal — GitHub-Token/Repo im Du-Tab.');
     }
   }
 
+  showUndoPill(sample.id, status);
   await refreshStats();
-  setTimeout(showNext, 280);   // wait for fly-off animation
+
+  // Karte fliegt weg, dann naechste
+  if (currentCardEls?.card) flyOff(currentCardEls.card, statusToFlyDir(status));
+  setTimeout(showNext, 280);
 }
 
-function wireDrawers() {
-  $('btn-settings').addEventListener('click', () => {
-    applySettingsToForm();
-    refreshStats();
-    $('settings-drawer').hidden = false;
-  });
-  $('settings-close').addEventListener('click', () => {
-    readSettingsFromForm();
-    $('settings-drawer').hidden = true;
-  });
-  $('btn-reload').addEventListener('click', async () => {
-    readSettingsFromForm();
-    set('queue', []);
-    $('settings-drawer').hidden = true;
-    await loadMore();
-    showNext();
-  });
+function showUndoPill(sampleId, status) {
+  clearTimeout(undoTimer);
+  const pill = $('undo-pill');
+  const label = $('undo-label');
+  label.textContent = `${labelForStatus(status)} zurueck`;
+  pill.hidden = false;
+  undoTimer = setTimeout(() => { pill.hidden = true; }, UNDO_VISIBLE_MS);
+}
 
-  $('btn-detail').addEventListener('click', () => {
+function labelForStatus(status) {
+  return ({ raus: 'Raus', mittel: 'Mittel', gut: 'Gut', stern: 'Stern' })[status] ?? status;
+}
+
+async function handleUndo() {
+  const lv = get('lastVote');
+  if (!lv) return;
+  await setStatus(lv.sampleId, lv.prevStatus);
+  // Sample zurueck an Stack-Anfang, current = neu setzen
+  const restored = await getSample(lv.sampleId);
+  if (restored) {
+    set('queue', [restored, ...get('queue')]);
+  }
+  set('lastVote', null);
+  $('undo-pill').hidden = true;
+  await refreshStats();
+  await showNext();
+}
+
+// ===== Tap-Pad / Hold / Wave-Click =====
+
+function handleTapPad() {
+  if (!get('current')) return;
+  setLoop(false);
+  playFromOffset(0);
+  startProgressTracker(get('current').duration);
+}
+
+function handleHoldStart() {
+  if (!get('current')) return;
+  setLoop(true);
+  playFromOffset(0, { loop: true });
+}
+
+function handleHoldEnd() {
+  // Letzter Durchgang noch zu Ende spielen, dann stoppen
+  setLoop(false);
+}
+
+function handleWaveClick(ratio) {
+  const sample = get('current');
+  if (!sample) return;
+  const dur = sample.duration ?? getCurrentDuration() ?? 0;
+  setLoop(false);
+  playFromOffset(ratio * dur);
+}
+
+// ===== Behalten-Tab =====
+
+async function refreshBehalten() {
+  const items = await getKept({
+    filter: get('behaltenFilter'),
+    search: get('behaltenSearch'),
+  });
+  const ok = renderKeptList($('behalten-list'), items, currentKeptId);
+  $('behalten-empty').hidden = ok;
+  $('behalten-counter').textContent = `${items.length} Eintrag${items.length === 1 ? '' : 'e'}`;
+}
+
+async function handleKeptTap(sample) {
+  if (currentKeptId === sample.id) {
+    audioStop();
+    setLoop(false);
+    currentKeptId = null;
+    await refreshBehalten();
+    return;
+  }
+  currentKeptId = sample.id;
+  await refreshBehalten();
+  try {
+    await ensureContextResumed();
+    await loadSample(sample.audioUrl);
+    setLoop(true);
+    play({ ...collectFxOpts(), loop: true });
+  } catch (err) {
+    showToast(`Audio-Fehler: ${err.message}`);
+    currentKeptId = null;
+    await refreshBehalten();
+  }
+}
+
+function handleKeptLongPress(sample) {
+  activeActionSample = sample;
+  $('action-title').textContent = sample.name;
+  $('action-sheet').hidden = false;
+}
+
+async function handleAction(action) {
+  const s = activeActionSample;
+  if (!s) return;
+  $('action-sheet').hidden = true;
+  audioStop();
+  setLoop(false);
+  currentKeptId = null;
+
+  if (action === 'upgrade') {
+    const next = s.status === 'mittel' ? 'gut' : s.status === 'gut' ? 'stern' : 'stern';
+    await setStatus(s.id, next);
+    showToast(`→ ${labelForStatus(next)}`);
+    if (next === 'stern') triggerStarSync(s);
+  } else if (action === 'downgrade') {
+    const next = s.status === 'stern' ? 'gut' : s.status === 'gut' ? 'mittel' : 'mittel';
+    await setStatus(s.id, next);
+    showToast(`→ ${labelForStatus(next)}`);
+  } else if (action === 'back-to-stack') {
+    await setStatus(s.id, 'neu');
+    set('queue', [{ ...s, status: 'neu' }, ...get('queue')]);
+    showToast(`→ Stack`);
+    switchTab('audition');
+    await showNext();
+    return;
+  } else if (action === 'fx') {
+    activeActionSample = s;
+    set('current', s);
+    try {
+      await ensureContextResumed();
+      await loadSample(s.audioUrl, $('waveform'));
+      $('detail-title').textContent = s.name;
+      $('detail-sheet').hidden = false;
+    } catch (err) {
+      showToast(`Audio-Fehler: ${err.message}`);
+    }
+    return;
+  } else if (action === 'sync') {
+    triggerStarSync(s);
+  } else if (action === 'rename' || action === 'tag') {
+    showToast(`${action} kommt in 2b`);
+  } else if (action === 'unstar') {
+    if (s.status !== 'stern') { showToast('Kein Stern.'); return; }
+    await setStatus(s.id, 'gut');
+    const settings = get('settings');
+    if (settings.githubToken && settings.githubRepo) {
+      deleteStarSample({ token: settings.githubToken, repo: settings.githubRepo, sample: s })
+        .then(() => showToast('Stern entfernt + Repo aufgeraeumt.'))
+        .catch((err) => showToast(`Repo-Delete fehlgeschlagen: ${err.message}`));
+    } else {
+      showToast('Stern lokal entfernt (kein Token fuer Repo-Cleanup).');
+    }
+  }
+
+  activeActionSample = null;
+  await refreshStats();
+  await refreshBehalten();
+}
+
+function triggerStarSync(sample) {
+  const s = get('settings');
+  if (!s.githubToken || !s.githubRepo) {
+    showToast('Kein Token/Repo — nur lokal.');
+    return;
+  }
+  pushStarSample({ token: s.githubToken, repo: s.githubRepo, sample })
+    .then(({ audioPath }) => showToast(`Stern: ${audioPath}`))
+    .catch((err) => showToast(`Sync-Fehler: ${err.message}`));
+}
+
+// ===== Themes-Tab =====
+
+function refreshThemesList() {
+  renderThemesList($('themes-list'), THEMES, get('theme'));
+  for (const item of $('themes-list').querySelectorAll('.theme-item')) {
+    item.addEventListener('click', () => {
+      const key = item.dataset.key;
+      set('theme', key);
+      set('queue', []);
+      refreshThemesList();
+      switchTab('audition');
+      loadMore().then(() => showNext());
+    });
+  }
+  $('themes-counter').textContent = `${Object.keys(THEMES).length} Themes`;
+}
+
+// ===== Onboarding =====
+
+function maybeShowOnboarding() {
+  const s = get('settings');
+  if (s.freesoundKey) {
+    $('onboarding').hidden = true;
+    setVoteButtonsEnabled(true);
+    return false;
+  }
+  $('card-stack').style.display = 'none';
+  $('empty-stack').hidden = true;
+  $('onboarding').hidden = false;
+  setVoteButtonsEnabled(false);
+  return true;
+}
+
+function setVoteButtonsEnabled(enabled) {
+  for (const btn of document.querySelectorAll('.vote-btn')) {
+    btn.disabled = !enabled;
+  }
+}
+
+async function handleOnboardingGo() {
+  const key = $('onb-freesound-key').value.trim();
+  const ghToken = $('onb-github-token').value.trim();
+  const ghRepo = $('onb-github-repo').value.trim();
+  if (!key) {
+    showToast('Freesound-Key noetig.');
+    return;
+  }
+  patch('settings', { freesoundKey: key, githubToken: ghToken, githubRepo: ghRepo });
+  saveSettings();
+  $('onboarding').hidden = true;
+  $('card-stack').style.display = '';
+  setVoteButtonsEnabled(true);
+  await loadMore();
+  await showNext();
+}
+
+// ===== Stack-Filter-Sheet =====
+
+function handleStackFilterApply() {
+  const radio = document.querySelector('input[name="stack-filter"]:checked');
+  const filter = radio ? radio.value : 'neu';
+  const query = $('filter-query').value.trim() || null;
+  set('stackFilter', filter);
+  set('queue', []);
+  $('filter-sheet').hidden = true;
+  loadMore({ filter, query }).then(() => showNext());
+}
+
+// ===== FX-Sheet =====
+
+function openDetailSheet() {
+  if (!get('current')) {
+    showToast('Kein Sample geladen.');
+    return;
+  }
+  const s = get('current');
+  $('detail-title').textContent = s.name;
+  const peak = getPeakInfo();
+  const lines = [
+    `Lizenz: ${s.license}`,
+    `Autor: ${s.author}`,
+    `Dauer: ${s.duration?.toFixed(2)} s`,
+    `Quelle: <a href="${s.url}" target="_blank" rel="noopener">${s.source}</a>`,
+  ];
+  if (peak) lines.push(`Peak: ${peak.peakDb.toFixed(1)} dBFS`);
+  if (s.attribution) lines.push(`Attribution: ${s.attribution}`);
+  $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+  // Wavesurfer-Container fuellen
+  loadSample(s.audioUrl, $('waveform')).catch((err) => console.warn(err));
+  $('detail-sheet').hidden = false;
+}
+
+// ===== Tastatur-Shortcuts =====
+
+function wireKeyboardShortcuts() {
+  window.addEventListener('keydown', (ev) => {
+    // Nicht in Eingabefeldern
+    const tag = ev.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (get('view') !== 'audition') return;
     if (!get('current')) return;
-    $('detail-title').textContent = get('current').name;
-    const meta = $('detail-meta');
-    const s = get('current');
-    const peak = getPeakInfo();
-    meta.innerHTML = '';
-    const lines = [
-      `Lizenz: ${s.license}`,
-      `Autor: ${s.author}`,
-      `Dauer: ${s.duration?.toFixed(2)} s`,
-      `Quelle: <a href="${s.url}" target="_blank" rel="noopener">Freesound</a>`,
-    ];
-    if (peak) lines.push(`Peak: ${peak.peakDb.toFixed(1)} dBFS`);
-    if (s.attribution) lines.push(`Attribution: ${s.attribution}`);
-    meta.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
-    $('detail-drawer').hidden = false;
+
+    const map = {
+      ArrowLeft: () => handleVote('raus'),
+      ArrowRight: () => handleVote('gut'),
+      ArrowUp: () => handleVote('stern'),
+      ArrowDown: () => handleVote('mittel'),
+      ' ': () => handleTapPad(),
+      l: () => toggleLoop(),
+      L: () => toggleLoop(),
+      f: () => openDetailSheet(),
+      F: () => openDetailSheet(),
+    };
+    if (map[ev.key]) {
+      ev.preventDefault();
+      map[ev.key]();
+    }
   });
-  $('detail-close').addEventListener('click', () => {
-    $('detail-drawer').hidden = true;
+}
+
+function toggleLoop() {
+  if (!get('current')) return;
+  // einfaches Toggle: wenn aktuell loop -> stoppen; sonst loop start
+  setLoop(true);
+  playFromOffset(0, { loop: true });
+  showToast('Loop ein. Erneut L = aus.');
+}
+
+// ===== Wiring =====
+
+function wireTabs() {
+  for (const btn of document.querySelectorAll('.tab-btn')) {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  }
+}
+
+function wireVoteButtons() {
+  for (const btn of document.querySelectorAll('.vote-btn')) {
+    btn.addEventListener('click', () => handleVote(btn.dataset.vote));
+  }
+  onVote(handleVote);
+  onTapPad(handleTapPad);
+  onHoldStart(handleHoldStart);
+  onHoldEnd(handleHoldEnd);
+  onWaveClick(handleWaveClick);
+  onKeptTap(handleKeptTap);
+  onKeptLongPress(handleKeptLongPress);
+  $('undo-btn').addEventListener('click', handleUndo);
+}
+
+function wireSheets() {
+  $('btn-detail').addEventListener('click', openDetailSheet);
+  $('detail-close').addEventListener('click', () => { $('detail-sheet').hidden = true; });
+
+  $('btn-filter').addEventListener('click', () => {
+    $('filter-query').value = '';
+    $('filter-sheet').hidden = false;
   });
+  $('filter-close').addEventListener('click', () => { $('filter-sheet').hidden = true; });
+  $('filter-apply').addEventListener('click', handleStackFilterApply);
+
+  $('action-close').addEventListener('click', () => { $('action-sheet').hidden = true; activeActionSample = null; });
+  for (const btn of $('action-sheet').querySelectorAll('[data-action]')) {
+    btn.addEventListener('click', () => handleAction(btn.dataset.action));
+  }
 }
 
 function wireFxControls() {
@@ -243,11 +639,43 @@ function wireFxControls() {
   }
 }
 
-function wireVoteButtons() {
-  for (const btn of document.querySelectorAll('.vote-btn')) {
-    btn.addEventListener('click', () => handleVote(btn.dataset.vote));
+function wireBehaltenFilters() {
+  for (const chip of document.querySelectorAll('#behalten-filters .chip')) {
+    chip.addEventListener('click', () => {
+      for (const c of document.querySelectorAll('#behalten-filters .chip')) c.classList.remove('active');
+      chip.classList.add('active');
+      set('behaltenFilter', chip.dataset.filter);
+      refreshBehalten();
+    });
   }
-  onVote(handleVote);
+  $('behalten-search').addEventListener('input', (ev) => {
+    set('behaltenSearch', ev.target.value.trim());
+    refreshBehalten();
+  });
+}
+
+function wireDuTab() {
+  $('btn-save-settings').addEventListener('click', () => {
+    readSettingsFromForm();
+    showToast('Gespeichert.');
+  });
+}
+
+function wireEmptyStack() {
+  $('empty-reload').addEventListener('click', () => {
+    set('queue', []);
+    loadMore().then(() => showNext());
+  });
+  $('empty-mittel').addEventListener('click', () => {
+    set('stackFilter', 'mittel');
+    set('queue', []);
+    loadMore({ filter: 'mittel' }).then(() => showNext());
+  });
+  $('empty-behalten').addEventListener('click', () => switchTab('behalten'));
+}
+
+function wireOnboarding() {
+  $('btn-onboarding-go').addEventListener('click', handleOnboardingGo);
 }
 
 function wireThemeName() {
@@ -259,8 +687,7 @@ function wireThemeName() {
 }
 
 function wireServiceWorker() {
-  // Service worker disabled in Stufe 1 — caching surface caused stale-cache pain.
-  // Unregister any existing SW from earlier deploys so users get fresh assets.
+  // Service worker disabled in Stufe 2a — wieder rein in 2c via vite-plugin-pwa.
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.getRegistrations()
     .then((regs) => regs.forEach((r) => r.unregister()))
@@ -270,24 +697,34 @@ function wireServiceWorker() {
   }
 }
 
+// ===== Boot =====
+
 async function boot() {
   try {
     loadSettings();
     applySettingsToForm();
-    wireDrawers();
-    wireFxControls();
+
+    wireTabs();
     wireVoteButtons();
+    wireSheets();
+    wireFxControls();
+    wireBehaltenFilters();
+    wireDuTab();
+    wireEmptyStack();
+    wireOnboarding();
     wireThemeName();
+    wireKeyboardShortcuts();
     wireServiceWorker();
 
-    const s = get('settings');
-    if (!s.freesoundKey) {
-      $('settings-drawer').hidden = false;
-      showToast('Setup: Freesound API-Key + GitHub-Token eingeben.');
-    } else {
-      await loadMore();
-      showNext();
+    switchTab('audition');
+
+    if (maybeShowOnboarding()) {
+      // Wartet auf User-Eingabe in Onboarding.
+      return;
     }
+
+    await loadMore();
+    await showNext();
     await refreshStats();
   } catch (err) {
     console.error('Boot failed:', err);

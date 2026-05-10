@@ -9,76 +9,173 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <meta name="robots" content="noindex,nofollow" />
     <title>toender</title>
-    <script type="module" crossorigin src="/toender/assets/index-zQ60bcuu.js"></script>
-    <link rel="stylesheet" crossorigin href="/toender/assets/index-QPqApCm_.css">
+    <script type="module" crossorigin src="/toender/assets/index-BI_-qgsU.js"></script>
+    <link rel="stylesheet" crossorigin href="/toender/assets/index-FKfHxStx.css">
   </head>
   <body>
     <div id="app">
-      <header id="header">
-        <div class="theme-name" id="theme-name">Kiesel</div>
-        <div class="header-actions">
-          <button id="btn-detail" class="icon-btn" title="Detail">FX</button>
-          <button id="btn-settings" class="icon-btn" title="Einstellungen">Setup</button>
-        </div>
-      </header>
 
-      <main id="stage">
-        <div id="card-stack"></div>
-        <div id="empty-state" hidden>
-          <p>Keine Samples geladen.</p>
-          <p class="hint">Setup oeffnen und Freesound-API-Key eingeben.</p>
-        </div>
-      </main>
+      <!-- AUDITION-TAB -->
+      <section class="view" id="view-audition" data-view="audition">
+        <header class="view-header">
+          <div class="header-left">
+            <div class="theme-name" id="theme-name">Kiesel</div>
+            <div class="stack-counter" id="stack-counter"></div>
+          </div>
+          <div class="header-actions">
+            <button id="btn-filter" class="icon-btn" title="Stack-Filter">···</button>
+            <button id="btn-detail" class="icon-btn" title="FX-Sheet">FX</button>
+          </div>
+        </header>
 
-      <footer id="actions">
-        <button class="vote-btn vote-out"   data-vote="raus"   title="Raus (Links)">x</button>
-        <button class="vote-btn vote-mid"   data-vote="mittel" title="Mittel (Unten)">~</button>
-        <button class="vote-btn vote-good"  data-vote="gut"    title="Gut (Rechts)">+</button>
-        <button class="vote-btn vote-star"  data-vote="stern"  title="Stern (Oben)">*</button>
-      </footer>
+        <main id="stage">
+          <div id="card-stack"></div>
 
-      <div id="settings-drawer" class="drawer" hidden>
-        <div class="drawer-head">
-          <h2>Einstellungen</h2>
-          <button class="icon-btn" id="settings-close">x</button>
-        </div>
-        <div class="drawer-body">
-          <label>Freesound API-Key
-            <input type="text" id="freesound-key" autocomplete="off" />
-          </label>
-          <label>GitHub Token (Stern-Sync)
-            <input type="password" id="github-token" autocomplete="off" />
-          </label>
-          <label>GitHub Repo (owner/name)
-            <input type="text" id="github-repo" placeholder="Urlaubert/toender" autocomplete="off" />
-          </label>
-          <label class="checkbox">
-            <input type="checkbox" id="loudness-normalize" checked />
-            Loudness-Normalize (-3 dBFS)
-          </label>
-          <label class="checkbox">
-            <input type="checkbox" id="license-publishable" checked />
-            Nur veroeffentlichbare Lizenzen
-          </label>
-          <label>Theme
-            <select id="theme-select">
-              <option value="kiesel">Kiesel</option>
-            </select>
-          </label>
-          <hr />
-          <p class="hint">
-            Status-Counts: <span id="stats">-</span>
-          </p>
-          <button id="btn-reload" class="primary">Samples neu laden</button>
-        </div>
-      </div>
+          <!-- Onboarding-Screen (statt schwarzem Bildschirm bei leerem Setup) -->
+          <div id="onboarding" class="onboarding-card" hidden>
+            <h2>toender</h2>
+            <p class="lead">
+              Sample-Audition mit Wisch-/Button-Gesten. Hoer Samples durch, vote
+              gut/mittel/raus/stern. Behaltenes landet als Sammlung in der App
+              und (mit GitHub-Token) automatisch ins Repo.
+            </p>
+            <ol class="onboarding-steps">
+              <li>
+                <strong>Freesound-Key holen</strong>
+                <a href="https://freesound.org/help/developers/" target="_blank" rel="noopener">freesound.org/help/developers/</a>
+                <input type="text" id="onb-freesound-key" placeholder="API-Key hier einfuegen" autocomplete="off" />
+              </li>
+              <li>
+                <strong>GitHub-Token (optional, fuer Stern-Sync)</strong>
+                <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">github.com/settings/tokens</a>
+                <input type="password" id="onb-github-token" placeholder="Token hier einfuegen" autocomplete="off" />
+                <input type="text" id="onb-github-repo" placeholder="owner/repo (z.B. Urlaubert/toender)" autocomplete="off" />
+              </li>
+            </ol>
+            <button id="btn-onboarding-go" class="primary">Loslegen</button>
+          </div>
 
-      <div id="detail-drawer" class="drawer" hidden>
-        <div class="drawer-head">
-          <h2 id="detail-title">Detail</h2>
+          <!-- Stack-Leer-Karte -->
+          <div id="empty-stack" class="empty-stack-card" hidden>
+            <h2>Stack leer</h2>
+            <p class="empty-stats" id="empty-stats"></p>
+            <div class="empty-actions">
+              <button id="empty-reload" class="primary">Neu laden</button>
+              <button id="empty-mittel">Mittel re-audition</button>
+              <button id="empty-behalten">→ Behalten ansehen</button>
+            </div>
+          </div>
+
+          <!-- Undo-Pille -->
+          <div id="undo-pill" class="undo-pill" hidden>
+            <button id="undo-btn">↶ <span id="undo-label">zurueck</span></button>
+          </div>
+        </main>
+
+        <footer id="actions">
+          <button class="vote-btn vote-out"   data-vote="raus"   title="Raus (← oder x)">x</button>
+          <button class="vote-btn vote-mid"   data-vote="mittel" title="Mittel (↓ oder ~)">~</button>
+          <button class="vote-btn vote-good"  data-vote="gut"    title="Gut (→ oder +)">+</button>
+          <button class="vote-btn vote-star"  data-vote="stern"  title="Stern (↑ oder *)">*</button>
+        </footer>
+      </section>
+
+      <!-- THEMES-TAB -->
+      <section class="view" id="view-themes" data-view="themes" hidden>
+        <header class="view-header">
+          <div class="header-left">
+            <div class="theme-name">Themes</div>
+            <div class="stack-counter" id="themes-counter"></div>
+          </div>
+        </header>
+        <main class="view-body">
+          <div id="themes-list"></div>
+          <button id="btn-new-theme" class="fab" title="Neues Theme (Stufe 2b)">+</button>
+        </main>
+      </section>
+
+      <!-- BEHALTEN-TAB -->
+      <section class="view" id="view-behalten" data-view="behalten" hidden>
+        <header class="view-header">
+          <div class="header-left">
+            <div class="theme-name">Behalten</div>
+            <div class="stack-counter" id="behalten-counter"></div>
+          </div>
+          <div class="header-actions">
+            <input type="search" id="behalten-search" placeholder="Suche..." />
+          </div>
+        </header>
+        <div class="filter-chips" id="behalten-filters">
+          <button class="chip active" data-filter="all">Alle</button>
+          <button class="chip" data-filter="stern">★ Stern</button>
+          <button class="chip" data-filter="gut">+ Gut</button>
+          <button class="chip" data-filter="mittel">~ Mittel</button>
+        </div>
+        <main class="view-body">
+          <div id="behalten-list"></div>
+          <div id="behalten-empty" class="empty-stack-card" hidden>
+            <p>Noch nichts behalten. Tindern hilft.</p>
+          </div>
+        </main>
+      </section>
+
+      <!-- DU-TAB -->
+      <section class="view" id="view-du" data-view="du" hidden>
+        <header class="view-header">
+          <div class="header-left">
+            <div class="theme-name">Du</div>
+          </div>
+        </header>
+        <main class="view-body view-scroll">
+          <section class="settings-section">
+            <h3>API-Keys</h3>
+            <label>Freesound API-Key
+              <input type="text" id="freesound-key" autocomplete="off" />
+            </label>
+            <label>GitHub Token (Stern-Sync)
+              <input type="password" id="github-token" autocomplete="off" />
+            </label>
+            <label>GitHub Repo (owner/name)
+              <input type="text" id="github-repo" placeholder="Urlaubert/toender" autocomplete="off" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>Defaults</h3>
+            <label class="checkbox">
+              <input type="checkbox" id="loudness-normalize" checked />
+              Loudness-Normalize (-3 dBFS)
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="license-publishable" checked />
+              Nur veroeffentlichbare Lizenzen
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h3>Stats</h3>
+            <div id="stats">-</div>
+          </section>
+
+          <section class="settings-section">
+            <h3>Stufe 2b (kommt)</h3>
+            <p class="hint">Mic-Aufnahme · File-Drop · eigene Themes · weitere Quellen (Xeno-Canto, Internet Archive)</p>
+          </section>
+
+          <section class="settings-section">
+            <button id="btn-save-settings" class="primary">Speichern</button>
+          </section>
+        </main>
+      </section>
+
+      <!-- FX-Bottom-Sheet -->
+      <div id="detail-sheet" class="sheet" hidden>
+        <div class="sheet-grabber"></div>
+        <div class="sheet-head">
+          <h2 id="detail-title">FX</h2>
           <button class="icon-btn" id="detail-close">x</button>
         </div>
-        <div class="drawer-body">
+        <div class="sheet-body">
           <div id="waveform"></div>
           <div class="fx-controls">
             <label>Pitch (Halbtoene)
@@ -113,7 +210,75 @@
         </div>
       </div>
 
+      <!-- Stack-Filter-Sheet -->
+      <div id="filter-sheet" class="sheet" hidden>
+        <div class="sheet-grabber"></div>
+        <div class="sheet-head">
+          <h2>Stack-Filter</h2>
+          <button class="icon-btn" id="filter-close">x</button>
+        </div>
+        <div class="sheet-body">
+          <label class="checkbox">
+            <input type="radio" name="stack-filter" value="neu" checked />
+            Nur unbewertet
+          </label>
+          <label class="checkbox">
+            <input type="radio" name="stack-filter" value="mittel" />
+            Mittel-Eimer re-audition
+          </label>
+          <label class="checkbox">
+            <input type="radio" name="stack-filter" value="all" />
+            Alle (auch schon gehoerte mit Marker)
+          </label>
+          <hr />
+          <label>Ad-hoc-Query (ueberschreibt Theme-Stichworte)
+            <input type="text" id="filter-query" placeholder="z.B. dunkel, kurz" />
+          </label>
+          <button id="filter-apply" class="primary">Anwenden + Reload</button>
+        </div>
+      </div>
+
+      <!-- Action-Sheet fuer Behalten-Long-Press -->
+      <div id="action-sheet" class="sheet" hidden>
+        <div class="sheet-grabber"></div>
+        <div class="sheet-head">
+          <h2 id="action-title">Sample</h2>
+          <button class="icon-btn" id="action-close">x</button>
+        </div>
+        <div class="sheet-body">
+          <button data-action="upgrade" class="action-btn">↑ Upgrade</button>
+          <button data-action="downgrade" class="action-btn">↓ Downgrade</button>
+          <button data-action="back-to-stack" class="action-btn">↺ Zurueck in Stack (Re-Audition)</button>
+          <button data-action="fx" class="action-btn">FX-Sheet oeffnen</button>
+          <button data-action="sync" class="action-btn">Stern-Sync erneut ausloesen</button>
+          <button data-action="rename" class="action-btn">Umbenennen (Stufe 2b)</button>
+          <button data-action="tag" class="action-btn">Tag/Notiz (Stufe 2b)</button>
+          <button data-action="unstar" class="action-btn destructive">Stern zurueckziehen</button>
+        </div>
+      </div>
+
+      <!-- Toast -->
       <div id="toast" hidden></div>
+
+      <!-- BOTTOM-TAB-BAR -->
+      <nav id="tabbar">
+        <button class="tab-btn" data-tab="themes">
+          <span class="tab-icon">○</span>
+          <span class="tab-label">Themes</span>
+        </button>
+        <button class="tab-btn active" data-tab="audition">
+          <span class="tab-icon">♦</span>
+          <span class="tab-label">Audition</span>
+        </button>
+        <button class="tab-btn" data-tab="behalten">
+          <span class="tab-icon">★</span>
+          <span class="tab-label">Behalten</span>
+        </button>
+        <button class="tab-btn" data-tab="du">
+          <span class="tab-icon">☰</span>
+          <span class="tab-label">Du</span>
+        </button>
+      </nav>
     </div>
 
   </body>

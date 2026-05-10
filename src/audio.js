@@ -1,6 +1,6 @@
 // Audio engine: load a remote sample, decode, optionally peak-normalize, play with FX.
 // Wavesurfer renders the waveform; playback uses our own Web Audio graph so
-// Pitch/Speed/Reverse/Highpass/Trim/Gain are all under one roof.
+// Pitch/Speed/Reverse/Highpass/Trim/Gain/Loop/Offset are all under one roof.
 
 import WaveSurfer from 'wavesurfer.js';
 
@@ -14,6 +14,10 @@ let currentSource = null;
 let currentGain = null;
 let currentFilter = null;
 let onEndedCallback = null;
+let loopMode = false;
+let lastPlayOpts = null;
+let currentAudioUrl = null;
+let loadInflight = null;
 
 function audioContext() {
   if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -48,30 +52,49 @@ function reverseBuffer(buffer) {
   return reversed;
 }
 
+// Load remote sample. If `container` given, also visualize with Wavesurfer.
 export async function loadSample(audioUrl, container) {
   await ensureContextResumed();
 
-  // Wavesurfer for visualization. We let it fetch its own copy because rendering
-  // on a decoded AudioBuffer requires the v7 backend dance and adds nothing.
+  if (currentAudioUrl === audioUrl && currentBuffer) {
+    // schon geladen — neue Wavesurfer-Instance wenn Container, sonst nix.
+    if (container) attachWavesurfer(audioUrl, container);
+    return { duration: currentBuffer.duration, peak: peakOf(currentBuffer) };
+  }
+
+  // Mehrfach-Aufrufe zusammenfuehren.
+  if (loadInflight && loadInflight.url === audioUrl) return loadInflight.promise;
+
+  const promise = (async () => {
+    if (container) attachWavesurfer(audioUrl, container);
+    const res = await fetch(audioUrl);
+    if (!res.ok) throw new Error(`Audio-Fetch ${res.status}`);
+    const arr = await res.arrayBuffer();
+    currentBuffer = await audioContext().decodeAudioData(arr);
+    currentAudioUrl = audioUrl;
+    return { duration: currentBuffer.duration, peak: peakOf(currentBuffer) };
+  })();
+  loadInflight = { url: audioUrl, promise };
+  try {
+    return await promise;
+  } finally {
+    if (loadInflight && loadInflight.url === audioUrl) loadInflight = null;
+  }
+}
+
+function attachWavesurfer(audioUrl, container) {
   if (wavesurfer) wavesurfer.destroy();
   wavesurfer = WaveSurfer.create({
     container,
     waveColor: '#666',
     progressColor: '#ff6a00',
     cursorColor: '#ff6a00',
-    height: 100,
+    height: 80,
     barWidth: 2,
     barGap: 1,
-    interact: false,
+    interact: true,    // wir wollen Click-zu-Position
   });
   wavesurfer.load(audioUrl);
-
-  // Independent fetch + decode for our playback graph.
-  const res = await fetch(audioUrl);
-  if (!res.ok) throw new Error(`Audio-Fetch ${res.status}`);
-  const arr = await res.arrayBuffer();
-  currentBuffer = await audioContext().decodeAudioData(arr);
-  return { duration: currentBuffer.duration, peak: peakOf(currentBuffer) };
 }
 
 export function stop() {
@@ -84,11 +107,27 @@ export function stop() {
   }
 }
 
-// Play with FX. opts: { pitch, speed, reverse, highpass, trimStart, trimEnd, normalize, onEnded }
-// pitch in semitones, speed in 0.25..4, highpass in Hz (0 = off), trims in seconds.
+// Replay from explicit offset (seconds). Re-uses last play opts if available.
+export function playFromOffset(offsetSec, opts = {}) {
+  const finalOpts = { ...(lastPlayOpts ?? {}), ...opts, trimStart: Math.max(0, offsetSec) };
+  play(finalOpts);
+}
+
+export function setLoop(on) {
+  loopMode = !!on;
+  // Wenn gerade gespielt wird und Loop neu eingeschaltet ist, sofort restart-on-end haengen.
+  // Loop-Strategie: bei onended replay vom selben trimStart.
+}
+
+export function isLooping() { return loopMode; }
+
+// Play with FX. opts: { pitch, speed, reverse, highpass, trimStart, trimEnd, normalize, onEnded, loop }
 export function play(opts = {}) {
   if (!currentBuffer) return;
   stop();
+
+  lastPlayOpts = opts;
+  if (opts.loop !== undefined) loopMode = !!opts.loop;
 
   const c = audioContext();
   const buffer = opts.reverse ? reverseBuffer(currentBuffer) : currentBuffer;
@@ -126,6 +165,11 @@ export function play(opts = {}) {
 
   src.onended = () => {
     currentSource = null;
+    if (loopMode) {
+      // Sofortiger Restart vom Loop-Start.
+      play({ ...opts, loop: true });
+      return;
+    }
     if (onEndedCallback) onEndedCallback();
   };
   onEndedCallback = opts.onEnded ?? null;
@@ -151,11 +195,16 @@ export function getPeakInfo() {
   };
 }
 
+export function getWavesurfer() { return wavesurfer; }
+export function getCurrentDuration() { return currentBuffer?.duration ?? 0; }
+
 export function destroy() {
   stop();
+  loopMode = false;
   if (wavesurfer) {
     try { wavesurfer.destroy(); } catch {}
     wavesurfer = null;
   }
   currentBuffer = null;
+  currentAudioUrl = null;
 }
