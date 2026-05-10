@@ -486,11 +486,17 @@ function maybeShowOnboarding() {
     setVoteButtonsEnabled(true);
     return false;
   }
+  showOnboarding();
+  return true;
+}
+
+function showOnboarding(reasonToast = null) {
   $('card-stack').style.display = 'none';
+  $('card-stack').innerHTML = '';
   $('empty-stack').hidden = true;
   $('onboarding').hidden = false;
   setVoteButtonsEnabled(false);
-  return true;
+  if (reasonToast) showToast(reasonToast, 4000);
 }
 
 function setVoteButtonsEnabled(enabled) {
@@ -521,11 +527,21 @@ async function handleOnboardingGo() {
 function handleStackFilterApply() {
   const radio = document.querySelector('input[name="stack-filter"]:checked');
   const filter = radio ? radio.value : 'neu';
-  const query = $('filter-query').value.trim() || null;
   set('stackFilter', filter);
   set('queue', []);
   $('filter-sheet').hidden = true;
-  loadMore({ filter, query }).then(() => showNext());
+  loadMore({ filter }).then(() => showNext());
+}
+
+function handleSearchApply() {
+  const query = $('search-query').value.trim();
+  if (!query) {
+    showToast('Stichwort fehlt.');
+    return;
+  }
+  set('queue', []);
+  $('search-sheet').hidden = true;
+  loadMore({ query }).then(() => showNext());
 }
 
 // ===== FX-Sheet =====
@@ -615,11 +631,21 @@ function wireSheets() {
   $('detail-close').addEventListener('click', () => { $('detail-sheet').hidden = true; });
 
   $('btn-filter').addEventListener('click', () => {
-    $('filter-query').value = '';
     $('filter-sheet').hidden = false;
   });
   $('filter-close').addEventListener('click', () => { $('filter-sheet').hidden = true; });
   $('filter-apply').addEventListener('click', handleStackFilterApply);
+
+  $('btn-search').addEventListener('click', () => {
+    $('search-query').value = '';
+    $('search-sheet').hidden = false;
+    setTimeout(() => $('search-query').focus(), 50);
+  });
+  $('search-close').addEventListener('click', () => { $('search-sheet').hidden = true; });
+  $('search-apply').addEventListener('click', handleSearchApply);
+  $('search-query').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') handleSearchApply();
+  });
 
   $('action-close').addEventListener('click', () => { $('action-sheet').hidden = true; activeActionSample = null; });
   for (const btn of $('action-sheet').querySelectorAll('[data-action]')) {
@@ -723,8 +749,27 @@ async function boot() {
       return;
     }
 
-    await loadMore();
-    await showNext();
+    // Onboarding-Inputs mit gespeicherten Werten vorbefuellen, falls User
+    // sie via Auth-Fehler nochmal sieht.
+    const s0 = get('settings');
+    $('onb-freesound-key').value = s0.freesoundKey ?? '';
+    $('onb-github-token').value = s0.githubToken ?? '';
+    $('onb-github-repo').value = s0.githubRepo ?? '';
+
+    const loaded = await loadMore();
+    if (loaded.length === 0) {
+      // Wenn nach loadMore() der Stack komplett leer und keine Behaltenen da sind,
+      // ist der Key vermutlich ungueltig oder kaputt — Onboarding wieder zeigen.
+      const allStats = await getStats();
+      const total = allStats.gut + allStats.stern + allStats.mittel + allStats.raus + allStats.neu;
+      if (total === 0) {
+        showOnboarding('Konnte keine Samples laden. Pruefe Freesound-API-Key.');
+      } else {
+        await showEmptyStack();
+      }
+    } else {
+      await showNext();
+    }
     await refreshStats();
   } catch (err) {
     console.error('Boot failed:', err);

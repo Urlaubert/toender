@@ -51,7 +51,7 @@ html, body {
   grid-template-rows: auto 1fr auto;
 }
 
-.view[hidden] { display: none; }
+.view[hidden] { display: none !important; }
 
 /* Audition-Tab nimmt 3 Zeilen, andere nur 2 */
 #view-themes, #view-behalten, #view-du {
@@ -242,26 +242,52 @@ html, body {
 .swipe-hint.up    { left: 50%; transform: translateX(-50%); color: var(--star); border-color: var(--star); }
 .swipe-hint.down  { left: 50%; bottom: 1rem; top: auto; transform: translateX(-50%); color: var(--mid); border-color: var(--mid); }
 
-/* Onboarding + Stack-Leer-Karte */
-.onboarding-card, .empty-stack-card {
+/* Stack-Leer-Karte (in-flow) */
+.empty-stack-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 1rem;
   padding: 1.25rem;
   max-width: 420px;
   width: 90%;
-  text-align: left;
+  text-align: center;
+  align-items: center;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
 
-.empty-stack-card { text-align: center; align-items: center; }
-
-.onboarding-card h2, .empty-stack-card h2 {
+.empty-stack-card h2 {
   margin: 0;
   font-size: 1.4rem;
   color: var(--accent);
+}
+
+/* Onboarding-Overlay: vollflaechig, ueber Header + Footer, mit Backdrop. */
+.onboarding-card {
+  position: fixed;
+  inset: 0;
+  bottom: calc(var(--tab-bar-h) + env(safe-area-inset-bottom, 0));
+  z-index: 150;
+  background: var(--bg);
+  padding: 2rem 1.25rem;
+  padding-top: max(env(safe-area-inset-top), 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Spezifitaet-Pflicht: hidden-Attribut MUSS display:none gewinnen. */
+.onboarding-card[hidden] { display: none !important; }
+.empty-stack-card[hidden] { display: none !important; }
+
+.onboarding-card h2 {
+  margin: 0;
+  font-size: 2rem;
+  color: var(--accent);
+  letter-spacing: 0.02em;
 }
 
 .onboarding-card .lead { color: var(--muted); font-size: 0.9rem; margin: 0; }
@@ -555,7 +581,7 @@ html, body {
   box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
   animation: sheet-up 0.2s ease-out;
 }
-.sheet[hidden] { display: none; }
+.sheet[hidden] { display: none !important; }
 
 @keyframes sheet-up {
   from { transform: translate(-50%, 100%); }

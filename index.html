@@ -21,6 +21,7 @@
             <div class="stack-counter" id="stack-counter"></div>
           </div>
           <div class="header-actions">
+            <button id="btn-search" class="icon-btn" title="Suche im Theme">⌕</button>
             <button id="btn-filter" class="icon-btn" title="Stack-Filter">···</button>
             <button id="btn-detail" class="icon-btn" title="FX-Sheet">FX</button>
           </div>
@@ -112,7 +113,7 @@
         <main class="view-body">
           <div id="behalten-list"></div>
           <div id="behalten-empty" class="empty-stack-card" hidden>
-            <p>Noch nichts behalten. Tindern hilft.</p>
+            <p>Noch nichts behalten. Wisch oder Buttons benutzen.</p>
           </div>
         </main>
       </section>
@@ -228,11 +229,32 @@
             <input type="radio" name="stack-filter" value="all" />
             Alle (auch schon gehoerte mit Marker)
           </label>
-          <hr />
-          <label>Ad-hoc-Query (ueberschreibt Theme-Stichworte)
-            <input type="text" id="filter-query" placeholder="z.B. dunkel, kurz" />
-          </label>
           <button id="filter-apply" class="primary">Anwenden + Reload</button>
+        </div>
+      </div>
+
+      <!-- Such-Sheet (Audition-Header → ⌕) -->
+      <div id="search-sheet" class="sheet" hidden>
+        <div class="sheet-grabber"></div>
+        <div class="sheet-head">
+          <h2>Suche</h2>
+          <button class="icon-btn" id="search-close">x</button>
+        </div>
+        <div class="sheet-body">
+          <p class="hint">
+            Statt der Theme-Stichworte ("Kiesel" → pebble/stone/...) gezielt
+            nach was anderem suchen. Beispiele: "dunkler stein", "krass kurz",
+            "wal wave", "knistern".
+          </p>
+          <label>Stichworte
+            <input type="text" id="search-query" placeholder="z.B. dunkel, kurz" autocomplete="off" />
+          </label>
+          <button id="search-apply" class="primary">Suchen + Stack ersetzen</button>
+          <hr />
+          <p class="hint">
+            Suche im <strong>Behalten</strong>-Tab (was Du bereits gespeichert
+            hast) ist dort oben rechts im Tab-Header.
+          </p>
         </div>
       </div>
 
