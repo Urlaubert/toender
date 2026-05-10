@@ -122,7 +122,11 @@ async function loadMore({ filter = null, query = null } = {}) {
   isLoadingMore = true;
   const themeKey = get('theme');
   const theme = getTheme(themeKey);
-  const queries = query ? [query] : theme.queries;
+  // query kann String mit Kommas oder Array sein
+  let queries;
+  if (Array.isArray(query)) queries = query;
+  else if (typeof query === 'string') queries = query.split(',').map((q) => q.trim()).filter(Boolean);
+  else queries = theme.queries;
   const effectiveFilter = filter ?? get('stackFilter');
 
   try {
@@ -489,23 +493,77 @@ function attachThemeLongPress(el, key) {
   let triggered = false;
   function start() {
     triggered = false;
-    timer = setTimeout(async () => {
+    timer = setTimeout(() => {
       triggered = true;
-      if (confirm(`Theme "${key}" loeschen?`)) {
-        await deleteCustomTheme(key);
-        if (get('theme') === key) set('theme', 'kiesel');
-        refreshThemesList();
-      }
-    }, 600);
+      if (navigator.vibrate) navigator.vibrate(40);
+      openThemeEditSheet(key);
+    }, 500);
   }
-  function cancel(ev) {
+  function cancel() {
     if (timer) { clearTimeout(timer); timer = null; }
-    if (triggered) ev.preventDefault?.();
+  }
+  function move(ev) {
+    // Wenn der Finger sich bewegt, abbrechen damit Scrollen geht
+    if (timer) { clearTimeout(timer); timer = null; }
   }
   el.addEventListener('pointerdown', start);
   el.addEventListener('pointerup', cancel);
-  el.addEventListener('pointerleave', cancel);
   el.addEventListener('pointercancel', cancel);
+  el.addEventListener('pointerleave', cancel);
+  el.addEventListener('pointermove', move);
+  // Klick-Handler wird in refreshThemesList() gesetzt; wenn Long-Press
+  // ausgeloest hat, verhindere den Klick.
+  el.addEventListener('click', (ev) => {
+    if (triggered) { ev.stopImmediatePropagation(); ev.preventDefault(); triggered = false; }
+  }, true);
+}
+
+let editingThemeKey = null;
+function openThemeEditSheet(key) {
+  const theme = getTheme(key);
+  if (!theme || BUILTINS[key]) {
+    showToast('Built-in-Themes sind nicht bearbeitbar.');
+    return;
+  }
+  editingThemeKey = key;
+  $('edit-theme-key').textContent = key;
+  $('edit-theme-name').value = theme.label ?? '';
+  $('edit-theme-queries').value = (theme.queries ?? []).join(', ');
+  $('edit-theme-duration').value = theme.durationMax ?? 8;
+  $('edit-theme-sheet').hidden = false;
+}
+
+async function handleEditThemeApply() {
+  if (!editingThemeKey) return;
+  const label = $('edit-theme-name').value.trim();
+  const queries = $('edit-theme-queries').value.split(',').map((q) => q.trim()).filter(Boolean);
+  const durMax = parseFloat($('edit-theme-duration').value) || 8;
+  if (!label || queries.length === 0) {
+    showToast('Name und mind. ein Stichwort.');
+    return;
+  }
+  await saveCustomTheme({ key: editingThemeKey, label, queries, durationMax: durMax });
+  showToast(`Theme "${label}" aktualisiert.`);
+  $('edit-theme-sheet').hidden = true;
+  refreshThemesList();
+  // Wenn das aktive Theme bearbeitet wurde, Anzeige aktualisieren
+  if (get('theme') === editingThemeKey) {
+    $('theme-name').textContent = label;
+  }
+  editingThemeKey = null;
+}
+
+async function handleEditThemeDelete() {
+  if (!editingThemeKey) return;
+  if (!confirm(`Theme "${editingThemeKey}" wirklich loeschen?`)) return;
+  await deleteCustomTheme(editingThemeKey);
+  if (get('theme') === editingThemeKey) {
+    set('theme', 'kiesel');
+    $('theme-name').textContent = getTheme('kiesel').label;
+  }
+  $('edit-theme-sheet').hidden = true;
+  refreshThemesList();
+  editingThemeKey = null;
 }
 
 // ===== Onboarding =====
@@ -565,18 +623,19 @@ function handleStackFilterApply() {
 }
 
 async function handleSearchApply() {
-  const query = $('search-query').value.trim();
+  const queryRaw = $('search-query').value.trim();
   const saveAs = $('search-save-as').value.trim();
-  if (!query) {
+  if (!queryRaw) {
     showToast('Stichwort fehlt.');
     return;
   }
+  const queries = queryRaw.split(',').map((q) => q.trim()).filter(Boolean);
 
   // Wenn User Namen angegeben hat -> als neues Theme speichern und aktivieren.
   // Sonst: ad-hoc-Suche innerhalb des aktuellen Themes (Stack ersetzen).
   if (saveAs) {
     const key = slugify(saveAs);
-    await saveCustomTheme({ key, label: saveAs, queries: [query], durationMax: 8 });
+    await saveCustomTheme({ key, label: saveAs, queries, durationMax: 8 });
     set('theme', key);
     refreshThemesList();
     $('theme-name').textContent = saveAs;
@@ -587,7 +646,7 @@ async function handleSearchApply() {
   $('search-sheet').hidden = true;
   $('search-query').value = '';
   $('search-save-as').value = '';
-  loadMore({ query }).then(() => showNext());
+  loadMore({ query: queries }).then(() => showNext());
 }
 
 // FAB im Themes-Tab: kleines Sheet zum manuellen Theme-Anlegen.
@@ -712,6 +771,10 @@ function wireSheets() {
   $('search-query').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') handleSearchApply();
   });
+
+  $('edit-theme-close').addEventListener('click', () => { $('edit-theme-sheet').hidden = true; editingThemeKey = null; });
+  $('edit-theme-apply').addEventListener('click', handleEditThemeApply);
+  $('edit-theme-delete').addEventListener('click', handleEditThemeDelete);
 
   $('btn-new-theme').addEventListener('click', () => {
     $('new-theme-name').value = '';

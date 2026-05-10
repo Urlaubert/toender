@@ -9,7 +9,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <meta name="robots" content="noindex,nofollow" />
     <title>toender</title>
-    <script type="module" crossorigin src="/toender/assets/index-BXdnJuhQ.js"></script>
+    <script type="module" crossorigin src="/toender/assets/index-CYyGpS8r.js"></script>
     <link rel="stylesheet" crossorigin href="/toender/assets/index-CzaDmCkm.css">
   </head>
   <body>
@@ -243,8 +243,8 @@
           <button class="icon-btn" id="search-close">x</button>
         </div>
         <div class="sheet-body">
-          <label>Stichworte (Freesound-Suche)
-            <input type="text" id="search-query" placeholder="z.B. wal, dunkler stein, knistern" autocomplete="off" />
+          <label>Stichworte (Freesound-Suche, Komma-getrennt fuer mehrere)
+            <input type="text" id="search-query" placeholder="z.B. wal, humpback, underwater" autocomplete="off" />
           </label>
           <label>Als neues Theme speichern? (Name optional)
             <input type="text" id="search-save-as" placeholder="z.B. Wal — leer = nur einmal suchen" autocomplete="off" />
@@ -263,6 +263,29 @@
         </div>
       </div>
 
+      <!-- Sheet "Theme bearbeiten" (Long-Press auf Custom-Theme) -->
+      <div id="edit-theme-sheet" class="sheet" hidden>
+        <div class="sheet-grabber"></div>
+        <div class="sheet-head">
+          <h2>Theme bearbeiten</h2>
+          <button class="icon-btn" id="edit-theme-close">x</button>
+        </div>
+        <div class="sheet-body">
+          <p class="hint">Key: <code id="edit-theme-key"></code></p>
+          <label>Name
+            <input type="text" id="edit-theme-name" autocomplete="off" />
+          </label>
+          <label>Stichworte (Komma-getrennt fuer mehrere Suchen)
+            <input type="text" id="edit-theme-queries" autocomplete="off" />
+          </label>
+          <label>Max. Dauer in Sekunden
+            <input type="number" id="edit-theme-duration" min="0.5" max="120" step="0.5" />
+          </label>
+          <button id="edit-theme-apply" class="primary">Speichern</button>
+          <button id="edit-theme-delete" class="action-btn destructive">Theme loeschen</button>
+        </div>
+      </div>
+
       <!-- Sheet "Neues Theme anlegen" (Themes-Tab FAB) -->
       <div id="new-theme-sheet" class="sheet" hidden>
         <div class="sheet-grabber"></div>
@@ -274,7 +297,7 @@
           <label>Name
             <input type="text" id="new-theme-name" placeholder="z.B. Wal" autocomplete="off" />
           </label>
-          <label>Stichworte (Komma-getrennt)
+          <label>Stichworte (Komma-getrennt fuer mehrere Suchen)
             <input type="text" id="new-theme-queries" placeholder="z.B. whale song, humpback, underwater" autocomplete="off" />
           </label>
           <label>Max. Dauer in Sekunden
@@ -282,8 +305,14 @@
           </label>
           <button id="new-theme-apply" class="primary">Anlegen</button>
           <p class="hint">
-            Long-Press auf ein Custom-Theme in der Liste = loeschen.
-            Built-in-Themes (Kiesel/Wind/Wasser) sind nicht loeschbar.
+            Jedes Komma-getrennte Stichwort wird einzeln gegen Freesound
+            gesucht (sorted by rating). Treffer werden dedupliziert. Beispiel
+            "whale song, humpback" laeuft als zwei getrennte Suchen, Du
+            kriegst die Top-Treffer aus beiden.
+          </p>
+          <p class="hint">
+            Long-Press auf ein Custom-Theme = bearbeiten oder loeschen.
+            Built-in-Themes (Kiesel/Wind/Wasser) sind nicht bearbeitbar.
           </p>
         </div>
       </div>
