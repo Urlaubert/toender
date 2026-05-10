@@ -3,6 +3,7 @@
 import './style.css';
 import { get, set, patch, on } from './state.js';
 import { getTheme, loadThemes, allThemes, saveCustomTheme, deleteCustomTheme, slugify, BUILTINS } from './themes.js';
+import { STORY_THEMES } from './presets.js';
 import { searchTheme } from './freesound.js';
 import {
   rememberSample, setStatus, getStats, getSample,
@@ -824,6 +825,31 @@ function wireDuTab() {
     readSettingsFromForm();
     showToast('Gespeichert.');
   });
+  $('btn-load-story-preset').addEventListener('click', loadStoryPreset);
+}
+
+async function loadStoryPreset() {
+  let added = 0, skipped = 0;
+  for (const t of STORY_THEMES) {
+    const existing = allThemes()[t.key];
+    if (existing && !BUILTINS[t.key]) {
+      skipped++;
+      continue;
+    }
+    if (BUILTINS[t.key]) {
+      skipped++;
+      continue;
+    }
+    await saveCustomTheme({
+      key: t.key,
+      label: t.label,
+      queries: t.queries,
+      durationMax: t.durationMax,
+    });
+    added++;
+  }
+  showToast(`${added} Themes angelegt, ${skipped} uebersprungen.`, 4000);
+  refreshThemesList();
 }
 
 function wireEmptyStack() {
