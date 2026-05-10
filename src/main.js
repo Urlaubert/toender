@@ -92,10 +92,21 @@ async function loadMore() {
       filtered.push(f);
     }
     set('queue', [...get('queue'), ...filtered]);
-    showToast(`${filtered.length} neue Samples geladen.`);
+    if (filtered.length === 0) {
+      // API hat geantwortet, aber alles schon gehoert oder Filter zu eng.
+      showToast(`Keine neuen Samples — alle bereits bewertet oder Filter zu eng.`);
+    } else {
+      showToast(`${filtered.length} neue Samples geladen.`);
+    }
   } catch (err) {
     console.error(err);
-    showToast(`Fehler: ${err.message}`);
+    if (err.status === 401 || err.status === 403) {
+      showToast(`Freesound-Key ungueltig (HTTP ${err.status}) — Setup pruefen.`);
+    } else if (err.status === 429) {
+      showToast(`Freesound-Limit erreicht (HTTP 429) — spaeter erneut.`);
+    } else {
+      showToast(`Fehler: ${err.message}`);
+    }
   } finally {
     isLoadingMore = false;
   }

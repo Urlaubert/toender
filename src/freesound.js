@@ -76,13 +76,17 @@ export async function search({ key, query, theme, durationMax, publishable, page
   const res = await fetch(`${API}/search/text/?${params}`, { headers: authHeaders(key) });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`Freesound ${res.status}: ${body.slice(0, 200)}`);
+    const err = new Error(`Freesound ${res.status}: ${body.slice(0, 200)}`);
+    err.status = res.status;
+    throw err;
   }
   const data = await res.json();
   return (data.results ?? []).map((r) => normalize(r, theme));
 }
 
 // Convenience: run several queries, dedupe by sourceId, cap to N.
+// Auth-Errors (401/403) und Rate-Limits (429) werden sofort hochgeworfen — sonst
+// schluckt der Per-Query-Try/Catch den Fehler und der User sieht nur "0 Samples".
 export async function searchTheme({ key, theme, queries, durationMax, publishable, target = 20 }) {
   const seen = new Set();
   const out = [];
@@ -104,6 +108,10 @@ export async function searchTheme({ key, theme, queries, durationMax, publishabl
         if (out.length >= target) break;
       }
     } catch (err) {
+      // Auth- und Rate-Limit-Fehler treffen alle Queries — sofort eskalieren.
+      if (err.status === 401 || err.status === 403 || err.status === 429) {
+        throw err;
+      }
       console.warn(`Suche fehlgeschlagen fuer "${q}":`, err.message);
     }
   }
