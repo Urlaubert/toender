@@ -2,7 +2,7 @@
 
 import './style.css';
 import { get, set, patch, on } from './state.js';
-import { getTheme, THEMES } from './themes.js';
+import { getTheme, loadThemes, allThemes, saveCustomTheme, deleteCustomTheme, slugify, BUILTINS } from './themes.js';
 import { searchTheme } from './freesound.js';
 import {
   rememberSample, setStatus, getStats, getSample,
@@ -463,18 +463,49 @@ function triggerStarSync(sample) {
 // ===== Themes-Tab =====
 
 function refreshThemesList() {
-  renderThemesList($('themes-list'), THEMES, get('theme'));
+  const themes = allThemes();
+  renderThemesList($('themes-list'), themes, get('theme'));
   for (const item of $('themes-list').querySelectorAll('.theme-item')) {
+    const key = item.dataset.key;
     item.addEventListener('click', () => {
-      const key = item.dataset.key;
       set('theme', key);
       set('queue', []);
       refreshThemesList();
       switchTab('audition');
+      const t = getTheme(key);
+      $('theme-name').textContent = t.label;
       loadMore().then(() => showNext());
     });
+    // Long-Press: nur Custom-Themes loeschbar
+    if (!BUILTINS[key]) {
+      attachThemeLongPress(item, key);
+    }
   }
-  $('themes-counter').textContent = `${Object.keys(THEMES).length} Themes`;
+  $('themes-counter').textContent = `${Object.keys(themes).length} Themes`;
+}
+
+function attachThemeLongPress(el, key) {
+  let timer = null;
+  let triggered = false;
+  function start() {
+    triggered = false;
+    timer = setTimeout(async () => {
+      triggered = true;
+      if (confirm(`Theme "${key}" loeschen?`)) {
+        await deleteCustomTheme(key);
+        if (get('theme') === key) set('theme', 'kiesel');
+        refreshThemesList();
+      }
+    }, 600);
+  }
+  function cancel(ev) {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (triggered) ev.preventDefault?.();
+  }
+  el.addEventListener('pointerdown', start);
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointerleave', cancel);
+  el.addEventListener('pointercancel', cancel);
 }
 
 // ===== Onboarding =====
@@ -533,15 +564,49 @@ function handleStackFilterApply() {
   loadMore({ filter }).then(() => showNext());
 }
 
-function handleSearchApply() {
+async function handleSearchApply() {
   const query = $('search-query').value.trim();
+  const saveAs = $('search-save-as').value.trim();
   if (!query) {
     showToast('Stichwort fehlt.');
     return;
   }
+
+  // Wenn User Namen angegeben hat -> als neues Theme speichern und aktivieren.
+  // Sonst: ad-hoc-Suche innerhalb des aktuellen Themes (Stack ersetzen).
+  if (saveAs) {
+    const key = slugify(saveAs);
+    await saveCustomTheme({ key, label: saveAs, queries: [query], durationMax: 8 });
+    set('theme', key);
+    refreshThemesList();
+    $('theme-name').textContent = saveAs;
+    showToast(`Theme "${saveAs}" angelegt.`);
+  }
+
   set('queue', []);
   $('search-sheet').hidden = true;
+  $('search-query').value = '';
+  $('search-save-as').value = '';
   loadMore({ query }).then(() => showNext());
+}
+
+// FAB im Themes-Tab: kleines Sheet zum manuellen Theme-Anlegen.
+async function handleNewThemeApply() {
+  const label = $('new-theme-name').value.trim();
+  const queries = $('new-theme-queries').value.trim();
+  const durMax = parseFloat($('new-theme-duration').value) || 8;
+  if (!label || !queries) {
+    showToast('Name und Stichworte fehlen.');
+    return;
+  }
+  const qList = queries.split(',').map((q) => q.trim()).filter(Boolean);
+  const key = slugify(label);
+  await saveCustomTheme({ key, label, queries: qList, durationMax: durMax });
+  showToast(`Theme "${label}" angelegt.`);
+  $('new-theme-sheet').hidden = true;
+  $('new-theme-name').value = '';
+  $('new-theme-queries').value = '';
+  refreshThemesList();
 }
 
 // ===== FX-Sheet =====
@@ -638,6 +703,7 @@ function wireSheets() {
 
   $('btn-search').addEventListener('click', () => {
     $('search-query').value = '';
+    $('search-save-as').value = '';
     $('search-sheet').hidden = false;
     setTimeout(() => $('search-query').focus(), 50);
   });
@@ -646,6 +712,16 @@ function wireSheets() {
   $('search-query').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') handleSearchApply();
   });
+
+  $('btn-new-theme').addEventListener('click', () => {
+    $('new-theme-name').value = '';
+    $('new-theme-queries').value = '';
+    $('new-theme-duration').value = '8';
+    $('new-theme-sheet').hidden = false;
+    setTimeout(() => $('new-theme-name').focus(), 50);
+  });
+  $('new-theme-close').addEventListener('click', () => { $('new-theme-sheet').hidden = true; });
+  $('new-theme-apply').addEventListener('click', handleNewThemeApply);
 
   $('action-close').addEventListener('click', () => { $('action-sheet').hidden = true; activeActionSample = null; });
   for (const btn of $('action-sheet').querySelectorAll('[data-action]')) {
@@ -728,6 +804,7 @@ function wireServiceWorker() {
 async function boot() {
   try {
     loadSettings();
+    await loadThemes();          // Custom-Themes aus IndexedDB einlesen
     applySettingsToForm();
 
     wireTabs();

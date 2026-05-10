@@ -1,31 +1,7 @@
-// IndexedDB-backed memory of every sample we've seen, via the `idb` promise wrapper.
-// Schema (V1):
-//   samples: { id, source, sourceId, status, theme, heardAt, url, license, attribution, meta }
-//   indices: status, theme, sourceId
+// IndexedDB-backed memory of every sample we've seen.
+// DB-Connection wird in db.js zentral verwaltet (V2 mit samples + themes).
 
-import { openDB } from 'idb';
-
-const DB_NAME = 'toender';
-const DB_VERSION = 1;
-const STORE = 'samples';
-
-let dbp = null;
-
-function db() {
-  if (!dbp) {
-    dbp = openDB(DB_NAME, DB_VERSION, {
-      upgrade(d) {
-        if (!d.objectStoreNames.contains(STORE)) {
-          const store = d.createObjectStore(STORE, { keyPath: 'id' });
-          store.createIndex('status', 'status');
-          store.createIndex('theme', 'theme');
-          store.createIndex('sourceId', 'sourceId');
-        }
-      },
-    });
-  }
-  return dbp;
-}
+import { db, STORE_SAMPLES as STORE } from './db.js';
 
 export async function rememberSample(sample) {
   const d = await db();

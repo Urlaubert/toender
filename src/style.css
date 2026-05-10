@@ -458,8 +458,9 @@ html, body {
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-  opacity: 0.5;
+  z-index: 50;
 }
+.fab:active { transform: scale(0.95); }
 
 /* === Behalten-Tab === */
 .filter-chips {
