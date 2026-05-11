@@ -8,7 +8,7 @@ import { searchTheme as searchFreesound } from './freesound.js';
 import { searchTheme as searchXenoCanto } from './xenocanto.js';
 import { searchTheme as searchArchive } from './archive.js';
 import { searchTheme as searchSccode } from './sccode.js';
-import { getStrudelSamples, STRUDEL_THEME, STRUDEL_THEME_KEY, SCCODE_THEME, SCCODE_THEME_KEY } from './strudel_patterns.js';
+import { getStrudelSamplesAsync, STRUDEL_THEME, STRUDEL_THEME_KEY, SCCODE_THEME, SCCODE_THEME_KEY } from './strudel_patterns.js';
 import {
   rememberSample, setStatus, getStats, getSample,
   getKept, getByTheme, getMittelForReAudition,
@@ -163,7 +163,7 @@ async function loadMore({ filter = null, query = null } = {}) {
   // Strudel-Theme: kein API-Aufruf, Patterns kommen aus statischem Manifest.
   if (themeKey === STRUDEL_THEME_KEY) {
     try {
-      const fresh = getStrudelSamples(themeKey);
+      const fresh = await getStrudelSamplesAsync(themeKey);
       const filtered = [];
       for (const f of fresh) {
         const existing = await getSample(f.id);
@@ -1190,14 +1190,21 @@ function wireThemeName() {
 }
 
 function wireServiceWorker() {
-  // Service worker disabled in Stufe 2a — wieder rein in 2c via vite-plugin-pwa.
+  // Stufe 2c: SW kommt jetzt aus vite-plugin-pwa (Workbox-basiert mit
+  // skipWaiting + clientsClaim + Versionierung). Alte handgeschriebene
+  // SWs (toender-shell-vN) muessen einmalig entfernt werden — danach
+  // uebernimmt der Workbox-SW.
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.getRegistrations()
-    .then((regs) => regs.forEach((r) => r.unregister()))
-    .catch(() => {});
-  if ('caches' in window) {
-    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {});
-  }
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    for (const reg of regs) {
+      // Workbox-SW erkennt sich an /workbox-*.js Script-URL. Den nicht killen.
+      const isWorkbox = reg.active?.scriptURL?.includes('workbox-')
+        || reg.active?.scriptURL?.includes('/sw.js?');
+      if (!isWorkbox && reg.active?.scriptURL?.endsWith('/sw.js')) {
+        reg.unregister().catch(() => {});
+      }
+    }
+  }).catch(() => {});
 }
 
 // ===== Boot =====

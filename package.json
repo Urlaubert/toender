@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/build_strudel_corpus.mjs",
+    "predev": "node scripts/build_strudel_corpus.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
@@ -13,6 +15,8 @@
     "wavesurfer.js": "^7.10.0"
   },
   "devDependencies": {
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vite-plugin-pwa": "^1.3.0",
+    "workbox-window": "^7.4.1"
   }
 }
