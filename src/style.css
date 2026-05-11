@@ -202,6 +202,39 @@ html, body {
   text-transform: uppercase;
 }
 
+/* Code-Sample-Card (Strudel/sccode): kein Audio-Preview, statt ♪ ein
+   Code-Snippet. */
+.card-art-code {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0.6rem;
+  font-size: 0.7rem;
+  background: linear-gradient(135deg, #1d2a2a, #0f1a1a);
+}
+.card-art-code .code-badge {
+  align-self: flex-start;
+  font-size: 0.65rem;
+  font-weight: bold;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.3rem;
+  margin-bottom: 0.4rem;
+}
+.card-art-code .code-preview {
+  flex: 1;
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--fg);
+  white-space: pre-wrap;
+  overflow: hidden;
+  text-align: left;
+}
+
 /* Wave-Strip auf Karte (klickbar fuer Position-Replay) */
 .card-wave {
   height: 48px;

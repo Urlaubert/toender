@@ -41,6 +41,15 @@ export function onWaveClick(handler) { onWaveClickCallback = handler; }
 export function onKeptTap(handler) { onKeptTapCallback = handler; }
 export function onKeptLongPress(handler) { onKeptLongPressCallback = handler; }
 
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function renderTopCard(stack, sample, theme) {
   stack.innerHTML = '';
   if (!sample) return null;
@@ -73,14 +82,36 @@ export async function renderTopCard(stack, sample, theme) {
   }
 
   // Tap-Pad: Tap = Replay, Hold ≥350ms = Loop
+  // Bei Code-Samples (Strudel/sccode) gibt's kein Browser-Audio →
+  // Card zeigt stattdessen Code-Vorschau + Hinweis. Strudel-Embed wuerde
+  // technisch in Iframe gehen, aber Auto-Play der CDN-Strudel-Page klemmt
+  // wegen Cross-Origin-Audio-Policy — daher nur Hinweis + FX-Sheet-Button.
   const art = document.createElement('div');
   art.className = 'card-art';
-  art.textContent = '♪';
-  const artHint = document.createElement('div');
-  artHint.className = 'card-art-hint';
-  artHint.textContent = 'Tap = Replay · Hold = Loop';
-  art.appendChild(artHint);
-  attachTapPad(art);
+  const isCodeSample = (sample.source === 'strudel' || sample.source === 'sccode')
+    && sample.patternCode;
+  if (isCodeSample) {
+    art.classList.add('card-art-code');
+    const sourceLabel = sample.source === 'strudel' ? 'STRUDEL' : 'SC';
+    const codePreview = sample.patternCode.split('\n').slice(0, 8).join('\n');
+    art.innerHTML = `
+      <div class="code-badge">${sourceLabel}</div>
+      <pre class="code-preview">${escapeHtml(codePreview)}${sample.patternCode.split('\n').length > 8 ? '\n…' : ''}</pre>
+      <div class="card-art-hint">Tap = FX-Sheet (Code + Copy)</div>
+    `;
+    art.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      // Trigger FX-Sheet — main.js wired den Button #btn-detail
+      document.getElementById('btn-detail')?.click();
+    });
+  } else {
+    art.textContent = '♪';
+    const artHint = document.createElement('div');
+    artHint.className = 'card-art-hint';
+    artHint.textContent = 'Tap = Replay · Hold = Loop';
+    art.appendChild(artHint);
+    attachTapPad(art);
+  }
 
   // Wave-Strip mit Click-to-Position
   const wave = document.createElement('div');

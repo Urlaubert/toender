@@ -98,6 +98,9 @@ function attachWavesurfer(audioUrl, container) {
 }
 
 export function stop() {
+  // Loop-Mode abschalten — sonst spielt ein verzoegerter onended-Event
+  // das alte Sample neu (S-089 Befund: Gibbon-Loop nach Wisch zu sccode).
+  loopMode = false;
   if (currentSource) {
     try { currentSource.onended = null; currentSource.stop(); } catch {}
     currentSource = null;
