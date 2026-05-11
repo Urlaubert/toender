@@ -168,10 +168,11 @@ async function loadMore({ filter = null, query = null } = {}) {
     }
 
     set('queue', [...get('queue'), ...filtered]);
+    const qPreview = queries.slice(0, 3).join(', ') + (queries.length > 3 ? ` (+${queries.length - 3})` : '');
     if (filtered.length === 0) {
-      showToast(`Keine passenden Samples — Filter zu eng oder alle gehoert.`);
+      showToast(`0 Samples fuer "${qPreview}" — anders suchen oder Filter aendern.`, 4000);
     } else {
-      showToast(`${filtered.length} Samples geladen.`);
+      showToast(`${filtered.length} Samples fuer "${qPreview}".`, 3000);
     }
     return filtered;
   } catch (err) {
@@ -543,13 +544,17 @@ async function handleEditThemeApply() {
     showToast('Name und mind. ein Stichwort.');
     return;
   }
+  const wasActive = (get('theme') === editingThemeKey);
   await saveCustomTheme({ key: editingThemeKey, label, queries, durationMax: durMax });
   showToast(`Theme "${label}" aktualisiert.`);
   $('edit-theme-sheet').hidden = true;
   refreshThemesList();
-  // Wenn das aktive Theme bearbeitet wurde, Anzeige aktualisieren
-  if (get('theme') === editingThemeKey) {
+  if (wasActive) {
     $('theme-name').textContent = label;
+    set('queue', []);
+    await loadMore();
+    await showNext();
+    showToast('Stack neu geladen mit neuen Stichworten.');
   }
   editingThemeKey = null;
 }
@@ -662,11 +667,18 @@ async function handleNewThemeApply() {
   const qList = queries.split(',').map((q) => q.trim()).filter(Boolean);
   const key = slugify(label);
   await saveCustomTheme({ key, label, queries: qList, durationMax: durMax });
-  showToast(`Theme "${label}" angelegt.`);
+  showToast(`Theme "${label}" angelegt + aktiviert.`);
   $('new-theme-sheet').hidden = true;
   $('new-theme-name').value = '';
   $('new-theme-queries').value = '';
+  // Direkt aktivieren und Stack leeren — sonst spielen alte Samples weiter.
+  set('theme', key);
+  set('queue', []);
+  $('theme-name').textContent = label;
   refreshThemesList();
+  switchTab('audition');
+  await loadMore();
+  await showNext();
 }
 
 // ===== FX-Sheet =====
