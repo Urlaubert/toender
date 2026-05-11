@@ -31,6 +31,11 @@ let isLoadingMore = false;
 let undoTimer = null;
 let currentKeptId = null;
 let activeActionSample = null;
+// Pages-State pro Theme: Map<themeKey, Map<query, lastPage>>
+const themePages = new Map();
+// Sort-Rotation pro Theme: zaehlt mit, jeder Reload nimmt naechsten Sort
+const themeSortIdx = new Map();
+const SORT_ROTATION = ['rating_desc', 'downloads_desc', 'created_desc', 'score', 'duration_desc'];
 
 function $(id) { return document.getElementById(id); }
 
@@ -134,6 +139,12 @@ async function loadMore({ filter = null, query = null } = {}) {
   const effectiveFilter = filter ?? get('stackFilter');
 
   try {
+    if (!themePages.has(themeKey)) themePages.set(themeKey, new Map());
+    const pagesMap = themePages.get(themeKey);
+    const sortIdx = themeSortIdx.get(themeKey) ?? 0;
+    const sort = SORT_ROTATION[sortIdx % SORT_ROTATION.length];
+    themeSortIdx.set(themeKey, sortIdx + 1);
+
     const fresh = await searchTheme({
       key: s.freesoundKey,
       theme: themeKey,
@@ -141,6 +152,8 @@ async function loadMore({ filter = null, query = null } = {}) {
       durationMax: theme.durationMax,
       publishable: s.licensePublishable,
       target: TARGET_QUEUE,
+      pages: pagesMap,
+      sort,
     });
 
     // Re-Anzeige als Marker statt Filter: nicht nur 'neu', sondern Status mit
@@ -174,10 +187,13 @@ async function loadMore({ filter = null, query = null } = {}) {
 
     set('queue', [...get('queue'), ...filtered]);
     const qPreview = queries.slice(0, 3).join(', ') + (queries.length > 3 ? ` (+${queries.length - 3})` : '');
+    const pageInfo = Array.from(pagesMap.values()).reduce((a, b) => Math.max(a, b), 0);
     if (filtered.length === 0) {
-      showToast(`0 Samples fuer "${qPreview}" — anders suchen oder Filter aendern.`, 4000);
+      // Vermutlich Seite leer — Page-Counter zuruecksetzen, evtl. anderer Sort hilft beim naechsten Mal.
+      pagesMap.clear();
+      showToast(`0 neue Samples — Seitenzaehler reset, beim naechsten "Laden" wieder von vorn.`, 4000);
     } else {
-      showToast(`${filtered.length} Samples fuer "${qPreview}".`, 3000);
+      showToast(`${filtered.length} Samples (Seite ~${pageInfo}, sort ${sort.split('_')[0]}).`, 3000);
     }
     return filtered;
   } catch (err) {

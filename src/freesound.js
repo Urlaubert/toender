@@ -61,14 +61,14 @@ function normalize(raw, theme) {
   };
 }
 
-export async function search({ key, query, theme, durationMax, publishable, page = 1, pageSize = 20 }) {
+export async function search({ key, query, theme, durationMax, publishable, page = 1, pageSize = 20, sort = 'rating_desc' }) {
   if (!key) throw new Error('Freesound API-Key fehlt');
   const params = new URLSearchParams({
     query,
     fields: FIELDS,
     page: String(page),
     page_size: String(pageSize),
-    sort: 'rating_desc',
+    sort,
   });
   const filter = buildFilter({ theme, durationMax, publishable });
   if (filter) params.set('filter', filter);
@@ -87,11 +87,20 @@ export async function search({ key, query, theme, durationMax, publishable, page
 // Convenience: run several queries, dedupe by sourceId, cap to N.
 // Auth-Errors (401/403) und Rate-Limits (429) werden sofort hochgeworfen — sonst
 // schluckt der Per-Query-Try/Catch den Fehler und der User sieht nur "0 Samples".
-export async function searchTheme({ key, theme, queries, durationMax, publishable, target = 20 }) {
+// `pages` = Map<query, lastPage>, damit aufeinanderfolgende Aufrufe weiter blaettern.
+// `sort` = optional, default 'rating_desc'. Werte: rating_desc, downloads_desc,
+// duration_asc, duration_desc, score, created_desc.
+export async function searchTheme({
+  key, theme, queries, durationMax, publishable,
+  target = 20, pages = null, sort = 'rating_desc',
+}) {
   const seen = new Set();
   const out = [];
+  const pagesMap = pages ?? new Map();
   for (const q of queries) {
     if (out.length >= target) break;
+    const page = (pagesMap.get(q) ?? 0) + 1;
+    pagesMap.set(q, page);
     try {
       const batch = await search({
         key,
@@ -99,6 +108,8 @@ export async function searchTheme({ key, theme, queries, durationMax, publishabl
         theme,
         durationMax,
         publishable,
+        page,
+        sort,
         pageSize: Math.max(10, target),
       });
       for (const s of batch) {
@@ -108,11 +119,10 @@ export async function searchTheme({ key, theme, queries, durationMax, publishabl
         if (out.length >= target) break;
       }
     } catch (err) {
-      // Auth- und Rate-Limit-Fehler treffen alle Queries — sofort eskalieren.
       if (err.status === 401 || err.status === 403 || err.status === 429) {
         throw err;
       }
-      console.warn(`Suche fehlgeschlagen fuer "${q}":`, err.message);
+      console.warn(`Suche fehlgeschlagen fuer "${q}" (page ${page}):`, err.message);
     }
   }
   return out;
