@@ -7,7 +7,7 @@ import { STORY_THEMES } from './presets.js';
 import { searchTheme } from './freesound.js';
 import {
   rememberSample, setStatus, getStats, getSample,
-  getKept, getMittelForReAudition,
+  getKept, getByTheme, getMittelForReAudition,
 } from './memory.js';
 import {
   renderTopCard, renderKeptList, renderThemesList,
@@ -22,8 +22,8 @@ import {
 import { pushStarSample, deleteStarSample } from './github.js';
 
 const SETTINGS_KEY = 'toender:settings';
-const TARGET_QUEUE = 20;
-const REFILL_THRESHOLD = 5;
+const TARGET_QUEUE = 50;
+const REFILL_THRESHOLD = 10;
 const UNDO_VISIBLE_MS = 3000;
 
 let currentCardEls = null;
@@ -74,8 +74,10 @@ function switchTab(name) {
   for (const view of document.querySelectorAll('.view')) {
     view.hidden = view.dataset.view !== name;
   }
+  // Tab-Bar-Markierung: theme-detail wird als "themes" markiert
+  const activeTab = name === 'theme-detail' ? 'themes' : name;
   for (const btn of document.querySelectorAll('.tab-btn')) {
-    btn.classList.toggle('active', btn.dataset.tab === name);
+    btn.classList.toggle('active', btn.dataset.tab === activeTab);
   }
   // Per-Tab-Render
   audioStop();
@@ -83,6 +85,7 @@ function switchTab(name) {
   currentKeptId = null;
   if (name === 'behalten') refreshBehalten();
   if (name === 'themes') refreshThemesList();
+  if (name === 'theme-detail') refreshThemeDetail();
   if (name === 'du') { applySettingsToForm(); refreshStats(); }
   if (name === 'audition') {
     // Auto-Play wieder anwerfen wenn current da ist
@@ -476,26 +479,65 @@ function triggerStarSync(sample) {
 
 // ===== Themes-Tab =====
 
+let detailThemeKey = null;
+let detailFilter = 'kept';
+
 function refreshThemesList() {
   const themes = allThemes();
   renderThemesList($('themes-list'), themes, get('theme'));
   for (const item of $('themes-list').querySelectorAll('.theme-item')) {
     const key = item.dataset.key;
-    item.addEventListener('click', () => {
-      set('theme', key);
-      set('queue', []);
-      refreshThemesList();
-      switchTab('audition');
-      const t = getTheme(key);
-      $('theme-name').textContent = t.label;
-      loadMore().then(() => showNext());
-    });
-    // Long-Press: nur Custom-Themes loeschbar
+    item.addEventListener('click', () => openThemeDetail(key));
     if (!BUILTINS[key]) {
       attachThemeLongPress(item, key);
     }
   }
   $('themes-counter').textContent = `${Object.keys(themes).length} Themes`;
+}
+
+function openThemeDetail(key) {
+  detailThemeKey = key;
+  detailFilter = 'kept';
+  // Filter-Chips Reset
+  for (const c of document.querySelectorAll('#detail-filters .chip')) {
+    c.classList.toggle('active', c.dataset.filter === 'kept');
+  }
+  switchTab('theme-detail');
+}
+
+async function refreshThemeDetail() {
+  if (!detailThemeKey) return;
+  const theme = getTheme(detailThemeKey);
+  $('detail-theme-name').textContent = theme.label;
+  const stats = await getStats(detailThemeKey);
+  $('detail-theme-stats').textContent =
+    `${stats.stern} ★ · ${stats.gut} + · ${stats.mittel} ~ · ${stats.raus} x · ${stats.neu} neu`;
+
+  // Liste aus IndexedDB filtern
+  const items = await getThemeSamples(detailThemeKey, detailFilter);
+  const ok = renderKeptList($('detail-sample-list'), items, currentKeptId);
+  $('detail-sample-empty').hidden = ok;
+}
+
+async function getThemeSamples(themeKey, filter) {
+  const all = await getKept({ filter: 'all', theme: themeKey });    // get alle bewerteten dieses Themes
+  // Custom-Filter
+  let result = all;
+  if (filter === 'kept') {
+    result = all.filter((s) => ['stern', 'gut', 'mittel'].includes(s.status));
+  } else if (filter === 'all') {
+    // alle bewerteten inkl raus
+    const everything = await getByTheme(themeKey);
+    result = everything.filter((s) => s.status !== 'neu');
+  } else if (filter === 'raus') {
+    const everything = await getByTheme(themeKey);
+    result = everything.filter((s) => s.status === 'raus');
+  } else {
+    result = all.filter((s) => s.status === filter);
+  }
+  const order = { stern: 0, gut: 1, mittel: 2, raus: 3 };
+  result.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || (b.heardAt - a.heardAt));
+  return result;
 }
 
 function attachThemeLongPress(el, key) {
@@ -553,10 +595,12 @@ async function handleEditThemeApply() {
     return;
   }
   const wasActive = (get('theme') === editingThemeKey);
+  const wasInDetail = (detailThemeKey === editingThemeKey);
   await saveCustomTheme({ key: editingThemeKey, label, queries, durationMax: durMax });
   showToast(`Theme "${label}" aktualisiert.`);
   $('edit-theme-sheet').hidden = true;
   refreshThemesList();
+  if (wasInDetail) await refreshThemeDetail();
   if (wasActive) {
     $('theme-name').textContent = label;
     set('queue', []);
@@ -792,6 +836,43 @@ function wireSheets() {
   $('search-query').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') handleSearchApply();
   });
+
+  // Theme-Detail-Buttons
+  $('detail-back').addEventListener('click', () => switchTab('themes'));
+  $('detail-start-audition').addEventListener('click', () => {
+    if (!detailThemeKey) return;
+    set('theme', detailThemeKey);
+    set('queue', []);
+    const t = getTheme(detailThemeKey);
+    $('theme-name').textContent = t.label;
+    switchTab('audition');
+    loadMore().then(() => showNext());
+  });
+  $('detail-load-more').addEventListener('click', async () => {
+    if (!detailThemeKey) return;
+    // Setze aktives Theme nur fuer den Lade-Vorgang. Wir laden in den Audition-
+    // Stack — wenn der User dann "Audition starten" druckt, sind die schon da.
+    set('theme', detailThemeKey);
+    showToast('Lade +50 Samples...');
+    await loadMore();
+    await refreshThemeDetail();
+  });
+  $('detail-theme-edit').addEventListener('click', () => {
+    if (!detailThemeKey) return;
+    if (BUILTINS[detailThemeKey]) {
+      showToast('Built-in-Themes sind nicht bearbeitbar.');
+      return;
+    }
+    openThemeEditSheet(detailThemeKey);
+  });
+  for (const chip of document.querySelectorAll('#detail-filters .chip')) {
+    chip.addEventListener('click', () => {
+      for (const c of document.querySelectorAll('#detail-filters .chip')) c.classList.remove('active');
+      chip.classList.add('active');
+      detailFilter = chip.dataset.filter;
+      refreshThemeDetail();
+    });
+  }
 
   $('edit-theme-close').addEventListener('click', () => { $('edit-theme-sheet').hidden = true; editingThemeKey = null; });
   $('edit-theme-apply').addEventListener('click', handleEditThemeApply);

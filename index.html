@@ -79,7 +79,7 @@
         </footer>
       </section>
 
-      <!-- THEMES-TAB -->
+      <!-- THEMES-TAB (Liste) -->
       <section class="view" id="view-themes" data-view="themes" hidden>
         <header class="view-header">
           <div class="header-left">
@@ -89,7 +89,39 @@
         </header>
         <main class="view-body">
           <div id="themes-list"></div>
-          <button id="btn-new-theme" class="fab" title="Neues Theme (Stufe 2b)">+</button>
+          <button id="btn-new-theme" class="fab" title="Neues Theme">+</button>
+        </main>
+      </section>
+
+      <!-- THEME-DETAIL (Sub-View vom Themes-Tab) -->
+      <section class="view" id="view-theme-detail" data-view="theme-detail" hidden>
+        <header class="view-header">
+          <div class="header-left">
+            <button class="icon-btn" id="detail-back" title="zurueck">←</button>
+            <div class="theme-name" id="detail-theme-name">—</div>
+            <div class="stack-counter" id="detail-theme-stats"></div>
+          </div>
+          <div class="header-actions">
+            <button class="icon-btn" id="detail-theme-edit" title="Stichworte">⌕</button>
+          </div>
+        </header>
+        <div class="theme-detail-actions">
+          <button id="detail-start-audition" class="primary">Audition starten</button>
+          <button id="detail-load-more" class="action-btn">+50 laden</button>
+        </div>
+        <div class="filter-chips" id="detail-filters">
+          <button class="chip active" data-filter="kept">Stern + Gut + Mittel</button>
+          <button class="chip" data-filter="stern">★ Stern</button>
+          <button class="chip" data-filter="gut">+ Gut</button>
+          <button class="chip" data-filter="mittel">~ Mittel</button>
+          <button class="chip" data-filter="raus">x Raus</button>
+          <button class="chip" data-filter="all">Alle bewertet</button>
+        </div>
+        <main class="view-body">
+          <div id="detail-sample-list"></div>
+          <div id="detail-sample-empty" class="empty-stack-card" hidden>
+            <p>Noch nichts in diesem Theme bewertet.</p>
+          </div>
         </main>
       </section>
 

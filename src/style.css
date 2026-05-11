@@ -511,6 +511,31 @@ html, body {
 .kept-item-status { font-size: 1rem; flex-shrink: 0; }
 .kept-item-meta { font-size: 0.7rem; color: var(--muted); }
 
+/* === Theme-Detail-View === */
+.theme-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.theme-detail-actions button {
+  flex: 1;
+  padding: 0.6rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.theme-detail-actions .primary { background: var(--accent); color: #000; border: none; }
+.theme-detail-actions .action-btn { background: var(--card); border: 1px solid var(--border); color: var(--fg); }
+.theme-detail-actions .action-btn:active { background: var(--bg-elev); }
+
+#detail-back {
+  margin-right: 0.5rem;
+}
+
+#view-theme-detail .header-left { flex-direction: row; align-items: center; gap: 0.5rem; }
+#view-theme-detail .header-left .theme-name { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* === Du-Tab === */
 .settings-section {
   display: flex;
