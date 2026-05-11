@@ -250,8 +250,8 @@
           <button class="icon-btn" id="search-close">x</button>
         </div>
         <div class="sheet-body">
-          <label>Stichworte (Freesound-Suche, Komma-getrennt fuer mehrere)
-            <input type="text" id="search-query" placeholder="z.B. wal, humpback, underwater" autocomplete="off" />
+          <label>Stichworte
+            <input type="text" id="search-query" placeholder="z.B. whale song, humpback, underwater" autocomplete="off" />
           </label>
           <label>Als neues Theme speichern? (Name optional)
             <input type="text" id="search-save-as" placeholder="z.B. Wal — leer = nur einmal suchen" autocomplete="off" />
@@ -259,13 +259,17 @@
           <button id="search-apply" class="primary">Suchen</button>
           <hr />
           <p class="hint">
-            Mit Namen: Theme wird gespeichert und ist im Themes-Tab wieder
-            waehlbar. Ohne Namen: einmalige Suche, Stack wird ersetzt, Theme
-            bleibt das aktuelle.
+            <strong>Leerzeichen</strong> = AND ("bird singing" findet nur was
+            beide enthaelt). <strong>Komma</strong> = OR (jede Phrase ist eigene
+            Suche, Treffer gemischt). 3 starke Phrasen schlagen 10 lose Adjektive.
           </p>
           <p class="hint">
-            Suche im <strong>Behalten</strong>-Tab (was Du bereits gespeichert
-            hast) ist dort oben rechts im Tab-Header.
+            Mit Namen: Theme persistent, im Themes-Tab waehlbar. Ohne Namen:
+            einmalige Suche, Stack wird ersetzt, Theme bleibt das aktuelle.
+          </p>
+          <p class="hint">
+            Suche im <strong>Behalten</strong>-Tab (bereits gespeichertes) ist
+            dort oben rechts.
           </p>
         </div>
       </div>
@@ -282,7 +286,7 @@
           <label>Name
             <input type="text" id="edit-theme-name" autocomplete="off" />
           </label>
-          <label>Stichworte (Komma-getrennt fuer mehrere Suchen)
+          <label>Stichworte (Leerzeichen = AND, Komma = mehrere Suchen)
             <input type="text" id="edit-theme-queries" autocomplete="off" />
           </label>
           <label>Max. Dauer in Sekunden
@@ -304,18 +308,19 @@
           <label>Name
             <input type="text" id="new-theme-name" placeholder="z.B. Wal" autocomplete="off" />
           </label>
-          <label>Stichworte (Komma-getrennt fuer mehrere Suchen)
-            <input type="text" id="new-theme-queries" placeholder="z.B. whale song, humpback, underwater" autocomplete="off" />
+          <label>Stichworte
+            <input type="text" id="new-theme-queries" placeholder="z.B. bird singing, songbird call, dawn chorus" autocomplete="off" />
           </label>
           <label>Max. Dauer in Sekunden
             <input type="number" id="new-theme-duration" min="0.5" max="120" step="0.5" value="8" />
           </label>
-          <button id="new-theme-apply" class="primary">Anlegen</button>
+          <button id="new-theme-apply" class="primary">Anlegen + aktivieren</button>
           <p class="hint">
-            Jedes Komma-getrennte Stichwort wird einzeln gegen Freesound
-            gesucht (sorted by rating). Treffer werden dedupliziert. Beispiel
-            "whale song, humpback" laeuft als zwei getrennte Suchen, Du
-            kriegst die Top-Treffer aus beiden.
+            <strong>Innerhalb eines Stichworts</strong> (Leerzeichen) gilt AND:
+            "bird singing" findet nur Sounds mit "bird" UND "singing".
+            <strong>Zwischen Stichworten</strong> (Komma) gilt OR: jede Phrase
+            ist eigene Suche, Treffer werden gemischt. Tipp: lieber 3 gute
+            Phrasen als 10 einzelne Adjektive.
           </p>
           <p class="hint">
             Long-Press auf ein Custom-Theme = bearbeiten oder loeschen.

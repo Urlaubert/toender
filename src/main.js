@@ -144,6 +144,8 @@ async function loadMore({ filter = null, query = null } = {}) {
     // beruecksichtigen je nach Stack-Filter.
     const filtered = [];
     for (const f of fresh) {
+      // Samples ohne Preview-URL ueberspringen — die koennen wir nicht abspielen.
+      if (!f.audioUrl) continue;
       const existing = await getSample(f.id);
       // 'neu' = nur unbewertete
       if (effectiveFilter === 'neu' && existing && existing.status !== 'neu') continue;
@@ -217,7 +219,12 @@ async function showNext() {
 
 async function playCurrent() {
   const sample = get('current');
-  if (!sample?.audioUrl) return;
+  if (!sample) return;
+  if (!sample.audioUrl) {
+    showToast('Sample ohne Vorschau-Audio — uebersprungen.', 2000);
+    setTimeout(showNext, 300);
+    return;
+  }
   try {
     await ensureContextResumed();
     await loadSample(sample.audioUrl);
@@ -226,7 +233,8 @@ async function playCurrent() {
     startProgressTracker(sample.duration);
   } catch (err) {
     console.warn('Audio-Fehler:', err);
-    showToast(`Audio-Fehler: ${err.message}`);
+    showToast(`Audio-Fehler: ${err.message} — uebersprungen.`, 3000);
+    setTimeout(showNext, 500);
   }
 }
 

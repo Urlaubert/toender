@@ -42,6 +42,12 @@ export const STORY_THEMES = [
     durationMax: 30,
   },
   {
+    key: 'voegel',
+    label: 'Voegel',
+    queries: ['bird singing', 'songbird call', 'dawn chorus', 'tropical bird'],
+    durationMax: 8,
+  },
+  {
     key: 'wasser-tropfen',
     label: 'Wasser-Tropfen',
     queries: ['water drop deep', 'drip cave', 'drop reverb', 'splash short'],
