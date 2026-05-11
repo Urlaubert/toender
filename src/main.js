@@ -905,15 +905,19 @@ function openDetailSheet() {
     $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
     setTimeout(() => wireCopyCodeBtn(s.patternCode), 50);
   } else if (isSccode || s.source === 'sccode') {
-    wf.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--muted);background:var(--card);border-radius:0.5rem">SuperCollider-Snippet von sccode.org. Code-Body ist via API nicht abrufbar — Link unten oeffnen, Code lesen/kopieren, in SuperCollider paste+evaluate.</div>`;
+    wf.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--muted);background:var(--card);border-radius:0.5rem">SuperCollider-Snippet aus der Gold-Bibliothek. Code unten ansehen, in Zwischenablage kopieren, in SuperCollider IDE paste+Ctrl+Enter.</div>`;
     if (fxControls) fxControls.style.display = 'none';
     const lines = [
       `Autor: ${s.author}`,
-      `<a href="${s.url}" target="_blank" rel="noopener">→ Auf sccode.org oeffnen</a>`,
+      `Cluster: ${s.cluster ?? '—'}`,
+      `Lizenz: ${s.license}`,
     ];
+    if (s.url) {
+      lines.push(`<a href="${s.url}" target="_blank" rel="noopener">→ Auf sccode.org suchen</a>`);
+    }
     if (s.patternCode) {
       lines.push(`SuperCollider-Code:`);
-      lines.push(`<pre id="detail-code" style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem;max-height:240px;overflow:auto">${escapeHtml(s.patternCode)}</pre>`);
+      lines.push(`<pre id="detail-code" style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem;max-height:280px;overflow:auto">${escapeHtml(s.patternCode)}</pre>`);
       lines.push(`<button class="action-btn" id="copy-code-btn">Code in Zwischenablage</button>`);
     }
     if (s.attribution) lines.push(s.attribution);

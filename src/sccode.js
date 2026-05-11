@@ -1,91 +1,103 @@
-// sccode.org API client — minimaler funktionierender Pfad.
+// sccode.org SuperCollider-Snippet-Source.
 //
-// Realitaet (S-088 Pruefung):
-// - /api/code listet die letzten N Codes mit {id, name, owner} — funktioniert, JSON.
-// - /api/code/{id}/json returnt HTML (Server-Bug oder API-Doku stimmt nicht).
-// - /api/tag returnt HTML.
-// - sccode.org sendet KEINE CORS-Header → fetch im Browser failt direkt.
+// Stand S-089 (2026-05-11): Statt Live-API (CORS-Proxy-unzuverlaessig)
+// liefert dieser Modul jetzt eine statische Korpus-JSON aus
+// public/sccode_corpus.json (gebaut via scripts/build_sccode_corpus.mjs
+// aus Musik/wissen/sc/gold/-Cluster). 37 kuratierte Snippets in 7 Clustern.
 //
-// Pragmatischer Ansatz fuer Toender:
-// 1. /api/code via Proxy-Kaskade holen — Listen-Endpoint klappt.
-// 2. Client-seitig nach Stichworten in Code-Namen filtern.
-// 3. Code-Body NICHT laden (geht nicht ueber API). Detail-Sheet zeigt nur
-//    Titel + Autor + Link "Auf sccode.org oeffnen" — User klickt rueber.
-// 4. Sample-DNA-Marker informiert "Code-Snippet, lokal lesen+kopieren".
+// Vorher (S-088): Live-API mit Proxy-Kaskade. Problem: sccode.org sendet
+// keine CORS-Header → fetch im Browser failt direkt, beide CORS-Proxies
+// (allorigins, corsproxy.io) unzuverlaessig. Plus: API liefert nur
+// Listing-Endpoint, kein Code-Body.
 //
-// Volle Code-Bibliothek waere via Server-Side-Scrape mit eigenem Tool
-// (Musik/tools/sccode_corpus/) als nightly/manueller Job — siehe IDEEN.md.
+// Jetzt: 100% statisch, ueber GitHub-Pages-Cache verfuegbar, Code-Body
+// drin, sccode.org-Attribution erhalten, Author + Cluster + Beschreibung
+// im Sample, Detail-Sheet zeigt vollen Code.
 
-import { proxiedFetch } from './cors.js';
+let cachedCorpus = null;
+let corpusPromise = null;
 
-const API_LIST = 'https://sccode.org/api/code';
-const VIEW_URL = 'https://sccode.org/';
+async function loadCorpus() {
+  if (cachedCorpus) return cachedCorpus;
+  if (corpusPromise) return corpusPromise;
+  corpusPromise = (async () => {
+    try {
+      const baseUrl = import.meta.env?.BASE_URL ?? '/';
+      const url = `${baseUrl}sccode_corpus.json`.replace(/\/\//g, '/');
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) {
+        throw new Error('Korpus leer oder kein Array');
+      }
+      cachedCorpus = data;
+      console.info(`sccode-corpus: ${data.length} Snippets geladen`);
+      return data;
+    } catch (err) {
+      console.warn('sccode-corpus konnte nicht geladen werden:', err.message);
+      cachedCorpus = [];
+      return cachedCorpus;
+    }
+  })();
+  return corpusPromise;
+}
 
-function normalize(raw, theme) {
-  const author = raw.owner?.name ?? raw.owner?.id ?? 'unknown';
+function normalize(item, theme, queries) {
+  const isOwn = item.author?.startsWith('Johannes');
   return {
-    id: `sccode:${raw.id}`,
+    id: `sccode:${item.id.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`,
     source: 'sccode',
-    sourceId: String(raw.id),
+    sourceId: item.slug,
     theme,
     status: 'neu',
-    name: raw.name ?? `SC-${raw.id}`,
-    author,
-    license: 'unknown',          // sccode-Listing hat keine Lizenz-Info, nur Detail-Page
+    name: item.title,
+    author: item.author,
+    license: isOwn ? 'CC0' : 'sccode.org community (Lizenz pro Snippet pruefen)',
     licenseUrl: '',
-    publishable: false,
-    attribution: `${raw.name ?? 'SC-' + raw.id} by ${author} (sccode.org)`,
+    publishable: isOwn,
+    attribution: isOwn ? null : `${item.title} by ${item.author} (sccode.org)`,
     duration: 0,
-    tags: [],                    // Listen-Endpoint liefert keine Tags
-    url: VIEW_URL + raw.id,
+    tags: item.tags ?? [],
+    url: isOwn ? null : `https://sccode.org/`,
     audioUrl: null,
-    patternCode: null,           // Code-Body kommt nicht ueber API
+    patternCode: item.code,
     codeLanguage: 'supercollider',
-    description: 'Code auf sccode.org ansehen — Link im Detail-Sheet.',
+    embedUrl: null,
+    description: item.description || `SuperCollider snippet from sccode.org, cluster: ${item.cluster}`,
+    cluster: item.cluster,
   };
 }
 
-// Holt N Pages der /api/code-Liste, filtert nach Stichwort im Namen.
-async function searchByName({ queries, target = 20, maxPages = 5 }) {
-  const out = [];
-  const seen = new Set();
-  // Stichworte lowercase als Match-Filter
-  const needles = queries.map((q) => String(q).toLowerCase());
-
-  for (let page = 1; page <= maxPages && out.length < target; page++) {
-    const url = `${API_LIST}?page=${page}`;
-    let data;
-    try {
-      const res = await proxiedFetch(url);
-      if (!res.ok) continue;
-      data = await res.json();
-    } catch (err) {
-      console.warn(`sccode page ${page} failed:`, err.message);
-      continue;
-    }
-    if (!Array.isArray(data) || data.length === 0) break;
-    for (const item of data) {
-      if (out.length >= target) break;
-      if (seen.has(item.id)) continue;
-      const nameLower = (item.name ?? '').toLowerCase();
-      if (needles.length === 0 || needles.some((n) => nameLower.includes(n))) {
-        seen.add(item.id);
-        out.push(item);
-      }
-    }
-  }
-  return out;
+// Stichwort-Filter wie in den anderen Quellen: queries gegen
+// title/author/cluster/description matchen.
+function matchesQueries(item, queries) {
+  if (!queries || queries.length === 0) return true;
+  const haystack = [
+    item.title, item.author, item.cluster, item.description,
+    ...(item.tags ?? []),
+    item.code?.slice(0, 200),  // erste 200 Code-Zeichen mit
+  ].join(' ').toLowerCase();
+  return queries.some((q) => haystack.includes(String(q).toLowerCase()));
 }
 
 export async function searchTheme({
   theme, queries, target = 20, pages = null,
 }) {
-  // pages-Map wird ignoriert — wir paginieren intern bis maxPages erreicht.
+  // pages-Map wird ignoriert — wir haben statische Liste, keine Pagination noetig.
   try {
-    const items = await searchByName({ queries, target });
-    return items.map((i) => normalize(i, theme));
+    const corpus = await loadCorpus();
+    const matched = corpus.filter((item) => matchesQueries(item, queries));
+    // Wenn keine Treffer und keine Stichworte: liefer alles. Sonst:
+    // wenn Stichworte da sind aber 0 Treffer, liefer alles (besser als leer).
+    const items = (matched.length === 0 && corpus.length > 0)
+      ? corpus.slice(0, target)
+      : matched.slice(0, target);
+    return items.map((i) => normalize(i, theme, queries));
   } catch (err) {
     console.warn('sccode searchTheme failed:', err.message);
     return [];
   }
 }
+
+// Kick off background-Load.
+loadCorpus();

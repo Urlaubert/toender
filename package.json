@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "node scripts/build_strudel_corpus.mjs",
-    "predev": "node scripts/build_strudel_corpus.mjs",
+    "build:corpus": "node scripts/build_strudel_corpus.mjs && node scripts/build_sccode_corpus.mjs",
+    "prebuild": "npm run build:corpus",
+    "predev": "npm run build:corpus",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
