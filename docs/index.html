@@ -9,7 +9,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <meta name="robots" content="noindex,nofollow" />
     <title>toender</title>
-    <script type="module" crossorigin src="/toender/assets/index-DqREtsz9.js"></script>
+    <script type="module" crossorigin src="/toender/assets/index-DTXXalZg.js"></script>
     <link rel="stylesheet" crossorigin href="/toender/assets/index-BwYBdNDM.css">
   </head>
   <body>
@@ -187,7 +187,11 @@
               <input type="checkbox" id="source-archive" />
               Internet Archive (Audio Collection, langsam)
             </label>
-            <p class="hint">Pro aktiver Quelle wird ein Teil des Stacks geladen.</p>
+            <label class="checkbox">
+              <input type="checkbox" id="source-sccode" checked />
+              sccode.org (SuperCollider-Code-Snippets)
+            </label>
+            <p class="hint">Pro aktiver Quelle wird ein Teil des Stacks geladen. Themes haben optional eine Quellen-Whitelist (z.B. "Voegel" nutzt nur xenocanto).</p>
           </section>
 
           <section class="settings-section">
@@ -342,6 +346,10 @@
           </label>
           <label>Max. Dauer in Sekunden
             <input type="number" id="edit-theme-duration" min="0.5" max="120" step="0.5" />
+          </label>
+          <label>Quellen (Komma-getrennt, leer = alle aktiven)
+            <input type="text" id="edit-theme-sources" placeholder="z.B. xenocanto, freesound" autocomplete="off" />
+            <span class="hint">freesound, xenocanto, archive — leer fuer alle</span>
           </label>
           <button id="edit-theme-apply" class="primary">Speichern</button>
           <button id="edit-theme-delete" class="action-btn destructive">Theme loeschen</button>

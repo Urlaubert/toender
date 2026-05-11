@@ -10,6 +10,7 @@ export const BUILTINS = {
     queries: ['pebble impact', 'stone hit', 'rock click', 'gravel'],
     tags: ['foley', 'percussion'],
     durationMax: 4,
+    sources: ['freesound', 'archive'],
     builtin: true,
   },
   wind: {
@@ -17,6 +18,7 @@ export const BUILTINS = {
     queries: ['wind howl', 'wind gust', 'breeze ambience'],
     tags: ['ambience', 'field-recording'],
     durationMax: 15,
+    sources: ['freesound', 'archive'],
     builtin: true,
   },
   wasser: {
@@ -24,6 +26,7 @@ export const BUILTINS = {
     queries: ['water drop', 'stream creek', 'wave splash', 'rain on surface'],
     tags: ['water', 'field-recording'],
     durationMax: 8,
+    sources: ['freesound', 'archive'],
     builtin: true,
   },
 };
@@ -77,16 +80,18 @@ export function slugify(text) {
 }
 
 // Speichert ein Custom-Theme. Gibt key zurueck.
-export async function saveCustomTheme({ key, label, queries, durationMax = 8, tags = [] }) {
+export async function saveCustomTheme({ key, label, queries, durationMax = 8, tags = [], sources = null }) {
   const d = await db();
   const k = key ?? slugify(label);
+  const existing = await d.get(STORE_THEMES, k);
   const row = {
     key: k,
     label: label ?? k,
     queries: Array.isArray(queries) ? queries : [queries],
     durationMax,
     tags,
-    createdAt: Date.now(),
+    sources: sources ?? existing?.sources ?? null,   // null = alle aktiven Quellen
+    createdAt: existing?.createdAt ?? Date.now(),
   };
   await d.put(STORE_THEMES, row);
   // Cache neu laden

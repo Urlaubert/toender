@@ -7,7 +7,8 @@ import { STORY_THEMES } from './presets.js';
 import { searchTheme as searchFreesound } from './freesound.js';
 import { searchTheme as searchXenoCanto } from './xenocanto.js';
 import { searchTheme as searchArchive } from './archive.js';
-import { getStrudelSamples, STRUDEL_THEME, STRUDEL_THEME_KEY } from './strudel_patterns.js';
+import { searchTheme as searchSccode } from './sccode.js';
+import { getStrudelSamples, STRUDEL_THEME, STRUDEL_THEME_KEY, SCCODE_THEME, SCCODE_THEME_KEY } from './strudel_patterns.js';
 import {
   rememberSample, setStatus, getStats, getSample,
   getKept, getByTheme, getMittelForReAudition,
@@ -83,6 +84,7 @@ function applySettingsToForm() {
   $('source-freesound').checked = s.sourceFreesound !== false;
   $('source-xenocanto').checked = s.sourceXenoCanto !== false;
   $('source-archive').checked = !!s.sourceArchive;
+  $('source-sccode').checked = s.sourceSccode !== false;
 }
 
 function readSettingsFromForm() {
@@ -95,6 +97,7 @@ function readSettingsFromForm() {
     sourceFreesound: $('source-freesound').checked,
     sourceXenoCanto: $('source-xenocanto').checked,
     sourceArchive: $('source-archive').checked,
+    sourceSccode: $('source-sccode').checked,
   });
   saveSettings();
 }
@@ -174,17 +177,33 @@ async function loadMore({ filter = null, query = null } = {}) {
     }
   }
 
-  // Aktive Audio-Quellen pruefen
-  const activeFreesound = s.sourceFreesound && s.freesoundKey;
-  const activeXeno = s.sourceXenoCanto;
-  const activeArchive = s.sourceArchive;
-  if (!activeFreesound && !activeXeno && !activeArchive) {
+  // Aktive Quellen pruefen, dann Theme-Whitelist anwenden.
+  const userActiveFs = s.sourceFreesound && s.freesoundKey;
+  const userActiveXeno = s.sourceXenoCanto;
+  const userActiveArchive = s.sourceArchive;
+  const userActiveSccode = s.sourceSccode;
+  if (!userActiveFs && !userActiveXeno && !userActiveArchive && !userActiveSccode) {
     showToast('Keine aktive Quelle — Du-Tab → Quellen-Toggle pruefen.');
     isLoadingMore = false;
     return [];
   }
   if (s.sourceFreesound && !s.freesoundKey) {
     showToast('Freesound aktiv aber kein API-Key — Du-Tab oeffnen.');
+  }
+
+  // Theme-Whitelist: wenn theme.sources gesetzt, nur diese Quellen anfragen.
+  // null oder leer = alle Quellen die der User aktiv hat (Fallback fuer alte Themes).
+  const whitelist = (theme.sources && theme.sources.length > 0) ? theme.sources : null;
+  const activeFreesound = userActiveFs && (whitelist === null || whitelist.includes('freesound'));
+  const activeXeno = userActiveXeno && (whitelist === null || whitelist.includes('xenocanto'));
+  const activeArchive = userActiveArchive && (whitelist === null || whitelist.includes('archive'));
+  const activeSccode = userActiveSccode && (whitelist === null || whitelist.includes('sccode'));
+
+  if (!activeFreesound && !activeXeno && !activeArchive && !activeSccode) {
+    const want = whitelist ? whitelist.join(', ') : 'beliebig';
+    showToast(`Theme "${theme.label}" braucht Quelle: ${want}. Du-Tab → einschalten.`, 4000);
+    isLoadingMore = false;
+    return [];
   }
 
   // query kann String mit Kommas oder Array sein
@@ -202,7 +221,7 @@ async function loadMore({ filter = null, query = null } = {}) {
     themeSortIdx.set(themeKey, sortIdx + 1);
 
     // Pro Quelle eigenes Target — gleichmaessige Verteilung auf aktive Quellen
-    const sourcesActive = [activeFreesound, activeXeno, activeArchive].filter(Boolean).length;
+    const sourcesActive = [activeFreesound, activeXeno, activeArchive, activeSccode].filter(Boolean).length;
     const perSource = Math.max(5, Math.ceil(TARGET_QUEUE / sourcesActive));
     const promises = [];
 
@@ -214,7 +233,6 @@ async function loadMore({ filter = null, query = null } = {}) {
       }).catch((e) => { console.warn('Freesound:', e); return []; }));
     }
     if (activeXeno) {
-      // Xeno-Canto braucht eigenen Pages-State pro Quelle
       const xenoKey = themeKey + ':xeno';
       if (!themePages.has(xenoKey)) themePages.set(xenoKey, new Map());
       promises.push(searchXenoCanto({
@@ -232,6 +250,11 @@ async function loadMore({ filter = null, query = null } = {}) {
         target: perSource, pages: themePages.get(arcKey),
       }).catch((e) => { console.warn('Archive:', e); return []; }));
     }
+    if (activeSccode) {
+      promises.push(searchSccode({
+        theme: themeKey, queries, target: perSource,
+      }).catch((e) => { console.warn('sccode:', e); return []; }));
+    }
 
     const results = await Promise.all(promises);
     // Interleavung: ein Treffer pro Quelle abwechselnd
@@ -241,8 +264,8 @@ async function loadMore({ filter = null, query = null } = {}) {
     // beruecksichtigen je nach Stack-Filter.
     const filtered = [];
     for (const f of fresh) {
-      // Samples ohne Preview-URL ueberspringen — die koennen wir nicht abspielen.
-      if (!f.audioUrl) continue;
+      // Audio-Samples brauchen audioUrl; Code-Samples brauchen patternCode.
+      if (!f.audioUrl && !f.patternCode) continue;
       const existing = await getSample(f.id);
       // 'neu' = nur unbewertete
       if (effectiveFilter === 'neu' && existing && existing.status !== 'neu') continue;
@@ -321,9 +344,12 @@ async function showNext() {
 async function playCurrent() {
   const sample = get('current');
   if (!sample) return;
-  // Strudel-Patterns: kein Audio-Preview, User muss FX-Sheet oeffnen fuer Iframe.
-  if (sample.source === 'strudel' && sample.patternCode) {
-    showToast('Strudel-Pattern: FX-Sheet (F) oeffnen zum Anhoeren.', 3500);
+  // Code-Snippets (Strudel, SuperCollider): kein Audio-Preview.
+  if ((sample.source === 'strudel' || sample.source === 'sccode') && sample.patternCode) {
+    const hint = sample.source === 'strudel'
+      ? 'Strudel-Pattern: FX (F) oeffnen → Iframe spielt es.'
+      : 'SuperCollider-Snippet: FX (F) oeffnen, Code kopieren, in SC paste+evaluate.';
+    showToast(hint, 4000);
     return;
   }
   if (!sample.audioUrl) {
@@ -685,6 +711,7 @@ function openThemeEditSheet(key) {
   $('edit-theme-name').value = theme.label ?? '';
   $('edit-theme-queries').value = (theme.queries ?? []).join(', ');
   $('edit-theme-duration').value = theme.durationMax ?? 8;
+  $('edit-theme-sources').value = (theme.sources ?? []).join(', ');
   $('edit-theme-sheet').hidden = false;
 }
 
@@ -699,7 +726,9 @@ async function handleEditThemeApply() {
   }
   const wasActive = (get('theme') === editingThemeKey);
   const wasInDetail = (detailThemeKey === editingThemeKey);
-  await saveCustomTheme({ key: editingThemeKey, label, queries, durationMax: durMax });
+  const sourcesRaw = $('edit-theme-sources').value.split(',').map((s) => s.trim()).filter(Boolean);
+  const sources = sourcesRaw.length > 0 ? sourcesRaw : null;
+  await saveCustomTheme({ key: editingThemeKey, label, queries, durationMax: durMax, sources });
   showToast(`Theme "${label}" aktualisiert.`);
   $('edit-theme-sheet').hidden = true;
   refreshThemesList();
@@ -847,11 +876,11 @@ function openDetailSheet() {
   $('detail-title').textContent = s.name;
 
   const isStrudel = s.source === 'strudel' && s.patternCode;
+  const isSccode = s.source === 'sccode' && s.patternCode;
   const wf = $('waveform');
   const fxControls = document.querySelector('#detail-sheet .fx-controls');
 
   if (isStrudel) {
-    // Strudel-Iframe statt Wavesurfer
     wf.innerHTML = '';
     const iframe = document.createElement('iframe');
     iframe.src = s.embedUrl;
@@ -862,11 +891,28 @@ function openDetailSheet() {
     const lines = [
       `Lizenz: ${s.license}`,
       `Strudel-Code:`,
-      `<pre style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem">${escapeHtml(s.patternCode)}</pre>`,
+      `<pre id="detail-code" style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem">${escapeHtml(s.patternCode)}</pre>`,
+      `<button class="action-btn" id="copy-code-btn">Code in Zwischenablage</button>`,
       `<a href="${s.embedUrl}" target="_blank" rel="noopener">Im Strudel-Editor oeffnen</a>`,
     ];
     if (s.attribution) lines.push(s.attribution);
     $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    setTimeout(() => wireCopyCodeBtn(s.patternCode), 50);
+  } else if (isSccode) {
+    wf.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--muted);background:var(--card);border-radius:0.5rem">SuperCollider-Code → Kopieren und in SC paste+evaluate.</div>`;
+    if (fxControls) fxControls.style.display = 'none';
+    const lines = [
+      `Lizenz: ${s.license}`,
+      `Autor: ${s.author}`,
+      `Tags: ${(s.tags ?? []).join(', ') || '—'}`,
+      `SuperCollider-Code:`,
+      `<pre id="detail-code" style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem;max-height:240px;overflow:auto">${escapeHtml(s.patternCode)}</pre>`,
+      `<button class="action-btn" id="copy-code-btn">Code in Zwischenablage</button>`,
+      `<a href="${s.url}" target="_blank" rel="noopener">Auf sccode.org oeffnen</a>`,
+    ];
+    if (s.attribution) lines.push(s.attribution);
+    $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    setTimeout(() => wireCopyCodeBtn(s.patternCode), 50);
   } else {
     if (fxControls) fxControls.style.display = '';
     const peak = getPeakInfo();
@@ -882,6 +928,19 @@ function openDetailSheet() {
     loadSample(s.audioUrl, wf).catch((err) => console.warn(err));
   }
   $('detail-sheet').hidden = false;
+}
+
+function wireCopyCodeBtn(code) {
+  const btn = $('copy-code-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast('Code kopiert.', 2000);
+    } catch (err) {
+      showToast(`Clipboard-Fehler: ${err.message}`, 3000);
+    }
+  });
 }
 
 function escapeHtml(str) {
@@ -1079,20 +1138,21 @@ async function loadStoryPreset() {
       label: t.label,
       queries: t.queries,
       durationMax: t.durationMax,
+      sources: t.sources ?? null,
     });
     added++;
   }
-  // Strudel-Theme als Spezial-Theme mit anlegen (Patterns aus Code, nicht aus API)
-  if (!allThemes()[STRUDEL_THEME_KEY]) {
-    await saveCustomTheme({
-      key: STRUDEL_THEME_KEY,
-      label: STRUDEL_THEME.label,
-      queries: STRUDEL_THEME.queries,
-      durationMax: STRUDEL_THEME.durationMax,
-    });
-    added++;
-  } else {
-    skipped++;
+  // Code-Themes (Strudel-Demo, sccode.org)
+  for (const t of [STRUDEL_THEME, SCCODE_THEME]) {
+    if (!allThemes()[t.key]) {
+      await saveCustomTheme({
+        key: t.key, label: t.label, queries: t.queries,
+        durationMax: t.durationMax, sources: t.sources ?? null,
+      });
+      added++;
+    } else {
+      skipped++;
+    }
   }
   showToast(`${added} Themes angelegt, ${skipped} uebersprungen.`, 4000);
   refreshThemesList();

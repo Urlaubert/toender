@@ -1,15 +1,11 @@
 // Xeno-Canto API client. Tier-/Vogelaufnahmen weltweit, vorwiegend CC.
 // Docs: https://xeno-canto.org/explore/api
 // Kein API-Key noetig, Rate-Limits via 429.
-// CORS: xeno-canto.org sendet KEINE Access-Control-Header → wir muessen
-// ueber einen Proxy gehen. allorigins.win ist gratis, CC-by-NC-genutzt.
+// CORS: xeno-canto.org sendet KEINE Access-Control-Header → Proxy-Kaskade.
+
+import { proxiedFetch } from './cors.js';
 
 const XENO = 'https://xeno-canto.org/api/2/recordings';
-const PROXY = 'https://api.allorigins.win/raw?url=';
-
-function proxied(url) {
-  return PROXY + encodeURIComponent(url);
-}
 
 function licenseToken(licUrl) {
   if (!licUrl) return 'unknown';
@@ -73,7 +69,7 @@ export async function search({ query, durationMax, publishable, page = 1, sort =
   const finalQuery = parts.join(' ');
 
   const url = `${XENO}?query=${encodeURIComponent(finalQuery)}&page=${page}`;
-  const res = await fetch(proxied(url));
+  const res = await proxiedFetch(url);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const err = new Error(`Xeno-Canto ${res.status}: ${body.slice(0, 200)}`);

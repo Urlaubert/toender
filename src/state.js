@@ -20,6 +20,7 @@ const data = {
     sourceFreesound: true,
     sourceXenoCanto: true,
     sourceArchive: false,    // langsam (zwei API-Calls pro Treffer), default aus
+    sourceSccode: true,      // sccode.org SuperCollider-Snippets, kein Key
   },
   stats: { neu: 0, raus: 0, mittel: 0, gut: 0, stern: 0 },
 };
