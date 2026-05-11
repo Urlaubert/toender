@@ -23,6 +23,26 @@ async function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+function buildMeta(sample) {
+  return {
+    id: sample.id,
+    source: sample.source,
+    sourceId: sample.sourceId,
+    theme: sample.theme,
+    name: sample.name,
+    author: sample.author,
+    license: sample.license,
+    licenseUrl: sample.licenseUrl,
+    publishable: sample.publishable,
+    attribution: sample.attribution,
+    duration: sample.duration,
+    sourceUrl: sample.url,
+    description: sample.description,
+    patternCode: sample.patternCode ?? null,
+    starredAt: new Date().toISOString(),
+  };
+}
+
 function inferExtension(url) {
   try {
     const u = new URL(url);
@@ -98,34 +118,32 @@ export async function deleteStarSample({ token, repo, sample }) {
 export async function pushStarSample({ token, repo, sample }) {
   if (!token) throw new Error('GitHub-Token fehlt');
   if (!repo)  throw new Error('GitHub-Repo fehlt');
+
+  const safeName = sample.sourceId.replace(/[^a-z0-9_-]/gi, '');
+  const metaPath  = `samples/kept/${sample.theme}/${sample.source}-${safeName}.json`;
+
+  // Strudel-Pattern: kein Audio-Download, sondern .strudel-Code-File
+  if (sample.source === 'strudel' && sample.patternCode) {
+    const codePath = `samples/kept/${sample.theme}/${sample.source}-${safeName}.strudel`;
+    const codeB64 = btoa(unescape(encodeURIComponent(sample.patternCode)));
+    const meta = buildMeta(sample);
+    const metaB64 = btoa(unescape(encodeURIComponent(JSON.stringify(meta, null, 2))));
+    await putFile({ token, repo, path: codePath, contentBase64: codeB64, message: `toender: stern strudel ${safeName}` });
+    await putFile({ token, repo, path: metaPath, contentBase64: metaB64, message: `toender: meta ${sample.source}-${safeName}` });
+    return { audioPath: codePath, metaPath };
+  }
+
   if (!sample.audioUrl) throw new Error('Sample hat keine audioUrl');
 
   const ext = inferExtension(sample.audioUrl);
-  const safeName = sample.sourceId.replace(/[^a-z0-9_-]/gi, '');
   const audioPath = `samples/kept/${sample.theme}/${sample.source}-${safeName}.${ext}`;
-  const metaPath  = `samples/kept/${sample.theme}/${sample.source}-${safeName}.json`;
 
   const audioRes = await fetch(sample.audioUrl);
   if (!audioRes.ok) throw new Error(`Audio-Fetch ${audioRes.status}`);
   const buf = await audioRes.arrayBuffer();
   const audioB64 = await arrayBufferToBase64(buf);
 
-  const meta = {
-    id: sample.id,
-    source: sample.source,
-    sourceId: sample.sourceId,
-    theme: sample.theme,
-    name: sample.name,
-    author: sample.author,
-    license: sample.license,
-    licenseUrl: sample.licenseUrl,
-    publishable: sample.publishable,
-    attribution: sample.attribution,
-    duration: sample.duration,
-    sourceUrl: sample.url,
-    description: sample.description,
-    starredAt: new Date().toISOString(),
-  };
+  const meta = buildMeta(sample);
   const metaB64 = btoa(unescape(encodeURIComponent(JSON.stringify(meta, null, 2))));
 
   await putFile({

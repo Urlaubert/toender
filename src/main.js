@@ -4,7 +4,10 @@ import './style.css';
 import { get, set, patch, on } from './state.js';
 import { getTheme, loadThemes, allThemes, saveCustomTheme, deleteCustomTheme, slugify, BUILTINS } from './themes.js';
 import { STORY_THEMES } from './presets.js';
-import { searchTheme } from './freesound.js';
+import { searchTheme as searchFreesound } from './freesound.js';
+import { searchTheme as searchXenoCanto } from './xenocanto.js';
+import { searchTheme as searchArchive } from './archive.js';
+import { getStrudelSamples, STRUDEL_THEME, STRUDEL_THEME_KEY } from './strudel_patterns.js';
 import {
   rememberSample, setStatus, getStats, getSample,
   getKept, getByTheme, getMittelForReAudition,
@@ -37,6 +40,24 @@ const themePages = new Map();
 const themeSortIdx = new Map();
 const SORT_ROTATION = ['rating_desc', 'downloads_desc', 'created_desc', 'score', 'duration_desc'];
 
+// Verschraenkt mehrere Quellen-Result-Arrays: ein Treffer pro Quelle abwechselnd.
+function interleaveSources(arrays, limit) {
+  const out = [];
+  const cursors = arrays.map(() => 0);
+  let exhausted = false;
+  while (!exhausted && out.length < limit) {
+    exhausted = true;
+    for (let i = 0; i < arrays.length; i++) {
+      if (cursors[i] < arrays[i].length) {
+        out.push(arrays[i][cursors[i]++]);
+        exhausted = false;
+        if (out.length >= limit) break;
+      }
+    }
+  }
+  return out;
+}
+
 function $(id) { return document.getElementById(id); }
 
 function loadSettings() {
@@ -59,6 +80,9 @@ function applySettingsToForm() {
   $('github-repo').value = s.githubRepo ?? '';
   $('loudness-normalize').checked = !!s.loudnessNormalize;
   $('license-publishable').checked = !!s.licensePublishable;
+  $('source-freesound').checked = s.sourceFreesound !== false;
+  $('source-xenocanto').checked = s.sourceXenoCanto !== false;
+  $('source-archive').checked = !!s.sourceArchive;
 }
 
 function readSettingsFromForm() {
@@ -68,6 +92,9 @@ function readSettingsFromForm() {
     githubRepo: $('github-repo').value.trim(),
     loudnessNormalize: $('loudness-normalize').checked,
     licensePublishable: $('license-publishable').checked,
+    sourceFreesound: $('source-freesound').checked,
+    sourceXenoCanto: $('source-xenocanto').checked,
+    sourceArchive: $('source-archive').checked,
   });
   saveSettings();
 }
@@ -124,13 +151,42 @@ async function refreshStats() {
 async function loadMore({ filter = null, query = null } = {}) {
   if (isLoadingMore) return [];
   const s = get('settings');
-  if (!s.freesoundKey) {
-    showToast('Freesound API-Key fehlt — Du-Tab oeffnen.');
-    return [];
-  }
   isLoadingMore = true;
   const themeKey = get('theme');
   const theme = getTheme(themeKey);
+
+  // Strudel-Theme: kein API-Aufruf, Patterns kommen aus statischem Manifest.
+  if (themeKey === STRUDEL_THEME_KEY) {
+    try {
+      const fresh = getStrudelSamples(themeKey);
+      const filtered = [];
+      for (const f of fresh) {
+        const existing = await getSample(f.id);
+        const merged = await rememberSample({ ...f, status: existing?.status ?? 'neu' });
+        if ((filter ?? get('stackFilter')) === 'neu' && existing && existing.status !== 'neu') continue;
+        filtered.push(merged);
+      }
+      set('queue', [...get('queue'), ...filtered]);
+      showToast(`${filtered.length} Strudel-Patterns geladen.`, 3000);
+      return filtered;
+    } finally {
+      isLoadingMore = false;
+    }
+  }
+
+  // Aktive Audio-Quellen pruefen
+  const activeFreesound = s.sourceFreesound && s.freesoundKey;
+  const activeXeno = s.sourceXenoCanto;
+  const activeArchive = s.sourceArchive;
+  if (!activeFreesound && !activeXeno && !activeArchive) {
+    showToast('Keine aktive Quelle — Du-Tab → Quellen-Toggle pruefen.');
+    isLoadingMore = false;
+    return [];
+  }
+  if (s.sourceFreesound && !s.freesoundKey) {
+    showToast('Freesound aktiv aber kein API-Key — Du-Tab oeffnen.');
+  }
+
   // query kann String mit Kommas oder Array sein
   let queries;
   if (Array.isArray(query)) queries = query;
@@ -145,16 +201,41 @@ async function loadMore({ filter = null, query = null } = {}) {
     const sort = SORT_ROTATION[sortIdx % SORT_ROTATION.length];
     themeSortIdx.set(themeKey, sortIdx + 1);
 
-    const fresh = await searchTheme({
-      key: s.freesoundKey,
-      theme: themeKey,
-      queries,
-      durationMax: theme.durationMax,
-      publishable: s.licensePublishable,
-      target: TARGET_QUEUE,
-      pages: pagesMap,
-      sort,
-    });
+    // Pro Quelle eigenes Target — gleichmaessige Verteilung auf aktive Quellen
+    const sourcesActive = [activeFreesound, activeXeno, activeArchive].filter(Boolean).length;
+    const perSource = Math.max(5, Math.ceil(TARGET_QUEUE / sourcesActive));
+    const promises = [];
+
+    if (activeFreesound) {
+      promises.push(searchFreesound({
+        key: s.freesoundKey, theme: themeKey, queries,
+        durationMax: theme.durationMax, publishable: s.licensePublishable,
+        target: perSource, pages: pagesMap, sort,
+      }).catch((e) => { console.warn('Freesound:', e); return []; }));
+    }
+    if (activeXeno) {
+      // Xeno-Canto braucht eigenen Pages-State pro Quelle
+      const xenoKey = themeKey + ':xeno';
+      if (!themePages.has(xenoKey)) themePages.set(xenoKey, new Map());
+      promises.push(searchXenoCanto({
+        theme: themeKey, queries,
+        durationMax: theme.durationMax, publishable: s.licensePublishable,
+        target: perSource, pages: themePages.get(xenoKey),
+      }).catch((e) => { console.warn('Xeno-Canto:', e); return []; }));
+    }
+    if (activeArchive) {
+      const arcKey = themeKey + ':archive';
+      if (!themePages.has(arcKey)) themePages.set(arcKey, new Map());
+      promises.push(searchArchive({
+        theme: themeKey, queries,
+        durationMax: theme.durationMax, publishable: s.licensePublishable,
+        target: perSource, pages: themePages.get(arcKey),
+      }).catch((e) => { console.warn('Archive:', e); return []; }));
+    }
+
+    const results = await Promise.all(promises);
+    // Interleavung: ein Treffer pro Quelle abwechselnd
+    const fresh = interleaveSources(results, TARGET_QUEUE);
 
     // Re-Anzeige als Marker statt Filter: nicht nur 'neu', sondern Status mit
     // beruecksichtigen je nach Stack-Filter.
@@ -186,14 +267,15 @@ async function loadMore({ filter = null, query = null } = {}) {
     }
 
     set('queue', [...get('queue'), ...filtered]);
-    const qPreview = queries.slice(0, 3).join(', ') + (queries.length > 3 ? ` (+${queries.length - 3})` : '');
-    const pageInfo = Array.from(pagesMap.values()).reduce((a, b) => Math.max(a, b), 0);
+    // Pro Quelle zaehlen
+    const counts = {};
+    for (const f of filtered) counts[f.source] = (counts[f.source] ?? 0) + 1;
+    const breakdown = Object.entries(counts).map(([k, v]) => `${k}:${v}`).join(' · ');
     if (filtered.length === 0) {
-      // Vermutlich Seite leer — Page-Counter zuruecksetzen, evtl. anderer Sort hilft beim naechsten Mal.
       pagesMap.clear();
-      showToast(`0 neue Samples — Seitenzaehler reset, beim naechsten "Laden" wieder von vorn.`, 4000);
+      showToast(`0 neue Samples aus allen aktiven Quellen — Seitenzaehler reset.`, 4000);
     } else {
-      showToast(`${filtered.length} Samples (Seite ~${pageInfo}, sort ${sort.split('_')[0]}).`, 3000);
+      showToast(`${filtered.length} Samples (${breakdown})`, 3000);
     }
     return filtered;
   } catch (err) {
@@ -239,6 +321,11 @@ async function showNext() {
 async function playCurrent() {
   const sample = get('current');
   if (!sample) return;
+  // Strudel-Patterns: kein Audio-Preview, User muss FX-Sheet oeffnen fuer Iframe.
+  if (sample.source === 'strudel' && sample.patternCode) {
+    showToast('Strudel-Pattern: FX-Sheet (F) oeffnen zum Anhoeren.', 3500);
+    return;
+  }
   if (!sample.audioUrl) {
     showToast('Sample ohne Vorschau-Audio — uebersprungen.', 2000);
     setTimeout(showNext, 300);
@@ -758,19 +845,49 @@ function openDetailSheet() {
   }
   const s = get('current');
   $('detail-title').textContent = s.name;
-  const peak = getPeakInfo();
-  const lines = [
-    `Lizenz: ${s.license}`,
-    `Autor: ${s.author}`,
-    `Dauer: ${s.duration?.toFixed(2)} s`,
-    `Quelle: <a href="${s.url}" target="_blank" rel="noopener">${s.source}</a>`,
-  ];
-  if (peak) lines.push(`Peak: ${peak.peakDb.toFixed(1)} dBFS`);
-  if (s.attribution) lines.push(`Attribution: ${s.attribution}`);
-  $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
-  // Wavesurfer-Container fuellen
-  loadSample(s.audioUrl, $('waveform')).catch((err) => console.warn(err));
+
+  const isStrudel = s.source === 'strudel' && s.patternCode;
+  const wf = $('waveform');
+  const fxControls = document.querySelector('#detail-sheet .fx-controls');
+
+  if (isStrudel) {
+    // Strudel-Iframe statt Wavesurfer
+    wf.innerHTML = '';
+    const iframe = document.createElement('iframe');
+    iframe.src = s.embedUrl;
+    iframe.style.cssText = 'width:100%;height:240px;border:none;border-radius:0.5rem;';
+    iframe.allow = 'autoplay';
+    wf.appendChild(iframe);
+    if (fxControls) fxControls.style.display = 'none';
+    const lines = [
+      `Lizenz: ${s.license}`,
+      `Strudel-Code:`,
+      `<pre style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem">${escapeHtml(s.patternCode)}</pre>`,
+      `<a href="${s.embedUrl}" target="_blank" rel="noopener">Im Strudel-Editor oeffnen</a>`,
+    ];
+    if (s.attribution) lines.push(s.attribution);
+    $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+  } else {
+    if (fxControls) fxControls.style.display = '';
+    const peak = getPeakInfo();
+    const lines = [
+      `Lizenz: ${s.license}`,
+      `Autor: ${s.author}`,
+      `Dauer: ${s.duration?.toFixed(2)} s`,
+      `Quelle: <a href="${s.url}" target="_blank" rel="noopener">${s.source}</a>`,
+    ];
+    if (peak) lines.push(`Peak: ${peak.peakDb.toFixed(1)} dBFS`);
+    if (s.attribution) lines.push(`Attribution: ${s.attribution}`);
+    $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    loadSample(s.audioUrl, wf).catch((err) => console.warn(err));
+  }
   $('detail-sheet').hidden = false;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
 }
 
 // ===== Tastatur-Shortcuts =====
@@ -964,6 +1081,18 @@ async function loadStoryPreset() {
       durationMax: t.durationMax,
     });
     added++;
+  }
+  // Strudel-Theme als Spezial-Theme mit anlegen (Patterns aus Code, nicht aus API)
+  if (!allThemes()[STRUDEL_THEME_KEY]) {
+    await saveCustomTheme({
+      key: STRUDEL_THEME_KEY,
+      label: STRUDEL_THEME.label,
+      queries: STRUDEL_THEME.queries,
+      durationMax: STRUDEL_THEME.durationMax,
+    });
+    added++;
+  } else {
+    skipped++;
   }
   showToast(`${added} Themes angelegt, ${skipped} uebersprungen.`, 4000);
   refreshThemesList();
