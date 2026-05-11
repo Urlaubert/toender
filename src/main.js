@@ -279,16 +279,24 @@ async function loadMore({ filter = null, query = null } = {}) {
 
     // Re-Anzeige als Marker statt Filter: nicht nur 'neu', sondern Status mit
     // beruecksichtigen je nach Stack-Filter.
-    // Dedup-Set: schon-in-Queue-IDs, damit "Mehr laden" nicht dieselben
-    // Samples zweimal in den Stack legt (war ein Befund S-089).
+    // Dedup gegen Queue mit zwei Keys: ID UND name+source. Letzteres faengt
+    // Freesound-Faelle wo dasselbe Sample bei mehreren Stichworten als Top-
+    // Treffer kommt (S-089 Befund "R15-77 Jungle Night" mehrfach).
     const queueIds = new Set(get('queue').map((q) => q.id));
+    const queueNameKeys = new Set(
+      get('queue').map((q) => `${q.source}|${(q.name ?? '').toLowerCase().trim()}`)
+    );
     const filtered = [];
     let skippedDupes = 0;
     for (const f of fresh) {
       // Audio-Samples brauchen audioUrl; Code-Samples brauchen patternCode.
       if (!f.audioUrl && !f.patternCode) continue;
-      // Dedup gegen Queue
-      if (queueIds.has(f.id)) { skippedDupes++; continue; }
+      // Dedup gegen Queue (ID + name+source)
+      const nameKey = `${f.source}|${(f.name ?? '').toLowerCase().trim()}`;
+      if (queueIds.has(f.id) || queueNameKeys.has(nameKey)) {
+        skippedDupes++;
+        continue;
+      }
       const existing = await getSample(f.id);
       // 'neu' = nur unbewertete
       if (effectiveFilter === 'neu' && existing && existing.status !== 'neu') continue;
@@ -302,6 +310,7 @@ async function loadMore({ filter = null, query = null } = {}) {
       });
       filtered.push(merged);
       queueIds.add(f.id);
+      queueNameKeys.add(nameKey);
     }
     if (skippedDupes > 0) {
       console.info(`loadMore: ${skippedDupes} bereits-im-Stack-Duplikate verworfen`);
