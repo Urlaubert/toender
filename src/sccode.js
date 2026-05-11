@@ -1,108 +1,91 @@
-// sccode.org API client. SuperCollider-Code-Snippets, kuratiert mit Tags.
-// Docs: https://sccode.org/api  (Endpunkte /code/CODE_ID/json, /api/tag)
-// CORS: sccode.org sendet *manchmal* CORS, aber unstet — durch Proxy-Kaskade.
-// Snippets sind Code, nicht Audio — Detail-Sheet zeigt Code + Copy-Button,
-// User rendert lokal in SuperCollider.
+// sccode.org API client — minimaler funktionierender Pfad.
+//
+// Realitaet (S-088 Pruefung):
+// - /api/code listet die letzten N Codes mit {id, name, owner} — funktioniert, JSON.
+// - /api/code/{id}/json returnt HTML (Server-Bug oder API-Doku stimmt nicht).
+// - /api/tag returnt HTML.
+// - sccode.org sendet KEINE CORS-Header → fetch im Browser failt direkt.
+//
+// Pragmatischer Ansatz fuer Toender:
+// 1. /api/code via Proxy-Kaskade holen — Listen-Endpoint klappt.
+// 2. Client-seitig nach Stichworten in Code-Namen filtern.
+// 3. Code-Body NICHT laden (geht nicht ueber API). Detail-Sheet zeigt nur
+//    Titel + Autor + Link "Auf sccode.org oeffnen" — User klickt rueber.
+// 4. Sample-DNA-Marker informiert "Code-Snippet, lokal lesen+kopieren".
+//
+// Volle Code-Bibliothek waere via Server-Side-Scrape mit eigenem Tool
+// (Musik/tools/sccode_corpus/) als nightly/manueller Job — siehe IDEEN.md.
 
 import { proxiedFetch } from './cors.js';
 
-const API_TAG = 'https://sccode.org/api/tag';
-const API_CODE = 'https://sccode.org/api/code';
-const VIEW_URL = 'https://sccode.org/1/sf/';
-
-function licenseToken(licStr) {
-  if (!licStr) return 'unknown';
-  const l = String(licStr).toLowerCase();
-  if (l.includes('cc0') || l.includes('public')) return 'CC0';
-  if (l.includes('by-nc-sa')) return 'CC-BY-NC-SA';
-  if (l.includes('by-nc')) return 'CC-BY-NC';
-  if (l.includes('by-sa')) return 'CC-BY-SA';
-  if (l.includes('by')) return 'CC-BY';
-  return 'unknown';
-}
+const API_LIST = 'https://sccode.org/api/code';
+const VIEW_URL = 'https://sccode.org/';
 
 function normalize(raw, theme) {
-  const license = licenseToken(raw.license);
-  const author = raw.user?.name ?? raw.user?.username ?? 'unknown';
+  const author = raw.owner?.name ?? raw.owner?.id ?? 'unknown';
   return {
     id: `sccode:${raw.id}`,
     source: 'sccode',
     sourceId: String(raw.id),
     theme,
     status: 'neu',
-    name: raw.title ?? `SC-${raw.id}`,
+    name: raw.name ?? `SC-${raw.id}`,
     author,
-    license,
-    licenseUrl: raw.license ?? '',
-    publishable: false,        // SC-Snippets sind Code — Publishing-Frage ist anders
-    attribution: `${raw.title ?? 'SC-' + raw.id} by ${author} (sccode.org, ${license})`,
-    duration: 0,                // Code, kein Audio
-    tags: raw.tags ?? [],
+    license: 'unknown',          // sccode-Listing hat keine Lizenz-Info, nur Detail-Page
+    licenseUrl: '',
+    publishable: false,
+    attribution: `${raw.name ?? 'SC-' + raw.id} by ${author} (sccode.org)`,
+    duration: 0,
+    tags: [],                    // Listen-Endpoint liefert keine Tags
     url: VIEW_URL + raw.id,
-    audioUrl: null,             // KEIN Audio-Preview
-    patternCode: raw.code ?? '',
+    audioUrl: null,
+    patternCode: null,           // Code-Body kommt nicht ueber API
     codeLanguage: 'supercollider',
-    description: raw.description ?? '',
+    description: 'Code auf sccode.org ansehen — Link im Detail-Sheet.',
   };
 }
 
-// sccode.org bietet:
-//  GET /api/tag                 → Liste aller Tags
-//  GET /api/tag/<name>          → Codes mit diesem Tag
-//  GET /api/code/<id>           → Einzel-Code mit Code-Body
-//
-// Wir suchen primaer per Tag (passt zu Themes). Wenn kein Tag-Match,
-// versuchen wir Full-Text-Suche ueber /api/search (falls vorhanden) —
-// die API ist nicht voll dokumentiert.
+// Holt N Pages der /api/code-Liste, filtert nach Stichwort im Namen.
+async function searchByName({ queries, target = 20, maxPages = 5 }) {
+  const out = [];
+  const seen = new Set();
+  // Stichworte lowercase als Match-Filter
+  const needles = queries.map((q) => String(q).toLowerCase());
 
-async function fetchTagCodes(tag) {
-  const url = `${API_TAG}/${encodeURIComponent(tag)}`;
-  try {
-    const res = await proxiedFetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.codes ?? data.code ?? data ?? [];
-  } catch {
-    return [];
+  for (let page = 1; page <= maxPages && out.length < target; page++) {
+    const url = `${API_LIST}?page=${page}`;
+    let data;
+    try {
+      const res = await proxiedFetch(url);
+      if (!res.ok) continue;
+      data = await res.json();
+    } catch (err) {
+      console.warn(`sccode page ${page} failed:`, err.message);
+      continue;
+    }
+    if (!Array.isArray(data) || data.length === 0) break;
+    for (const item of data) {
+      if (out.length >= target) break;
+      if (seen.has(item.id)) continue;
+      const nameLower = (item.name ?? '').toLowerCase();
+      if (needles.length === 0 || needles.some((n) => nameLower.includes(n))) {
+        seen.add(item.id);
+        out.push(item);
+      }
+    }
   }
-}
-
-async function fetchCodeDetail(id) {
-  const url = `${API_CODE}/${id}`;
-  try {
-    const res = await proxiedFetch(url);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
+  return out;
 }
 
 export async function searchTheme({
   theme, queries, target = 20, pages = null,
 }) {
-  const seen = new Set();
-  const out = [];
-  // sccode.org hat Tag-API — wir nutzen jedes Stichwort als Tag-Probe.
-  // Wenn das Stichwort als Tag existiert, kriegen wir die Liste; sonst leer.
-  for (const q of queries) {
-    if (out.length >= target) break;
-    // Normalisiere Stichwort: nur ersten Wort verwenden, lowercase
-    const tag = String(q).toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9-]/g, '');
-    if (!tag) continue;
-    const codes = await fetchTagCodes(tag);
-    for (const c of codes) {
-      if (out.length >= target) break;
-      if (seen.has(c.id)) continue;
-      seen.add(c.id);
-      // Wenn Code-Body fehlt, einzeln holen
-      let full = c;
-      if (!c.code) {
-        full = await fetchCodeDetail(c.id);
-        if (!full) continue;
-      }
-      out.push(normalize(full, theme));
-    }
+  // pages-Map wird ignoriert — wir paginieren intern bis maxPages erreicht.
+  try {
+    const items = await searchByName({ queries, target });
+    return items.map((i) => normalize(i, theme));
+  } catch (err) {
+    console.warn('sccode searchTheme failed:', err.message);
+    return [];
   }
-  return out;
 }

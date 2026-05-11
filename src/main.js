@@ -77,6 +77,7 @@ function saveSettings() {
 function applySettingsToForm() {
   const s = get('settings');
   $('freesound-key').value = s.freesoundKey ?? '';
+  $('xenocanto-key').value = s.xenoCantoKey ?? '';
   $('github-token').value = s.githubToken ?? '';
   $('github-repo').value = s.githubRepo ?? '';
   $('loudness-normalize').checked = !!s.loudnessNormalize;
@@ -90,6 +91,7 @@ function applySettingsToForm() {
 function readSettingsFromForm() {
   patch('settings', {
     freesoundKey: $('freesound-key').value.trim(),
+    xenoCantoKey: $('xenocanto-key').value.trim(),
     githubToken: $('github-token').value.trim(),
     githubRepo: $('github-repo').value.trim(),
     loudnessNormalize: $('loudness-normalize').checked,
@@ -233,13 +235,17 @@ async function loadMore({ filter = null, query = null } = {}) {
       }).catch((e) => { console.warn('Freesound:', e); return []; }));
     }
     if (activeXeno) {
-      const xenoKey = themeKey + ':xeno';
-      if (!themePages.has(xenoKey)) themePages.set(xenoKey, new Map());
-      promises.push(searchXenoCanto({
-        theme: themeKey, queries,
-        durationMax: theme.durationMax, publishable: s.licensePublishable,
-        target: perSource, pages: themePages.get(xenoKey),
-      }).catch((e) => { console.warn('Xeno-Canto:', e); return []; }));
+      if (!s.xenoCantoKey) {
+        showToast('Xeno-Canto braucht API-Key (Du-Tab). Account auf xeno-canto.org/account anlegen.', 5000);
+      } else {
+        const xenoKey = themeKey + ':xeno';
+        if (!themePages.has(xenoKey)) themePages.set(xenoKey, new Map());
+        promises.push(searchXenoCanto({
+          key: s.xenoCantoKey, theme: themeKey, queries,
+          durationMax: theme.durationMax, publishable: s.licensePublishable,
+          target: perSource, pages: themePages.get(xenoKey),
+        }).catch((e) => { console.warn('Xeno-Canto:', e); return []; }));
+      }
     }
     if (activeArchive) {
       const arcKey = themeKey + ':archive';
@@ -898,21 +904,21 @@ function openDetailSheet() {
     if (s.attribution) lines.push(s.attribution);
     $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
     setTimeout(() => wireCopyCodeBtn(s.patternCode), 50);
-  } else if (isSccode) {
-    wf.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--muted);background:var(--card);border-radius:0.5rem">SuperCollider-Code → Kopieren und in SC paste+evaluate.</div>`;
+  } else if (isSccode || s.source === 'sccode') {
+    wf.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--muted);background:var(--card);border-radius:0.5rem">SuperCollider-Snippet von sccode.org. Code-Body ist via API nicht abrufbar — Link unten oeffnen, Code lesen/kopieren, in SuperCollider paste+evaluate.</div>`;
     if (fxControls) fxControls.style.display = 'none';
     const lines = [
-      `Lizenz: ${s.license}`,
       `Autor: ${s.author}`,
-      `Tags: ${(s.tags ?? []).join(', ') || '—'}`,
-      `SuperCollider-Code:`,
-      `<pre id="detail-code" style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem;max-height:240px;overflow:auto">${escapeHtml(s.patternCode)}</pre>`,
-      `<button class="action-btn" id="copy-code-btn">Code in Zwischenablage</button>`,
-      `<a href="${s.url}" target="_blank" rel="noopener">Auf sccode.org oeffnen</a>`,
+      `<a href="${s.url}" target="_blank" rel="noopener">→ Auf sccode.org oeffnen</a>`,
     ];
+    if (s.patternCode) {
+      lines.push(`SuperCollider-Code:`);
+      lines.push(`<pre id="detail-code" style="font-size:0.75rem;white-space:pre-wrap;background:var(--bg-elev);padding:0.5rem;border-radius:0.4rem;max-height:240px;overflow:auto">${escapeHtml(s.patternCode)}</pre>`);
+      lines.push(`<button class="action-btn" id="copy-code-btn">Code in Zwischenablage</button>`);
+    }
     if (s.attribution) lines.push(s.attribution);
     $('detail-meta').innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
-    setTimeout(() => wireCopyCodeBtn(s.patternCode), 50);
+    if (s.patternCode) setTimeout(() => wireCopyCodeBtn(s.patternCode), 50);
   } else {
     if (fxControls) fxControls.style.display = '';
     const peak = getPeakInfo();

@@ -13,6 +13,7 @@ const data = {
   busy: false,
   settings: {
     freesoundKey: '',
+    xenoCantoKey: '',
     githubToken: '',
     githubRepo: '',
     loudnessNormalize: true,

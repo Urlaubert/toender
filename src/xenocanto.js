@@ -1,11 +1,10 @@
-// Xeno-Canto API client. Tier-/Vogelaufnahmen weltweit, vorwiegend CC.
+// Xeno-Canto API client v3 (Stand 2026-05).
 // Docs: https://xeno-canto.org/explore/api
-// Kein API-Key noetig, Rate-Limits via 429.
-// CORS: xeno-canto.org sendet KEINE Access-Control-Header → Proxy-Kaskade.
+// API-Key noetig: https://xeno-canto.org/account (registrieren + Key kopieren).
+// CORS-Header sind drauf, kein Proxy noetig.
+// v2 ist 404 → v3 hat anderes Response-Format, vermutlich aehnlich.
 
-import { proxiedFetch } from './cors.js';
-
-const XENO = 'https://xeno-canto.org/api/2/recordings';
+const XENO = 'https://xeno-canto.org/api/3/recordings';
 
 function licenseToken(licUrl) {
   if (!licUrl) return 'unknown';
@@ -60,16 +59,21 @@ function normalize(raw, theme) {
   };
 }
 
-export async function search({ query, durationMax, publishable, page = 1, sort = 'quality' }) {
+export async function search({ key, query, durationMax, publishable, page = 1, sort = 'quality' }) {
+  if (!key) {
+    const err = new Error('Xeno-Canto API-Key fehlt (Du-Tab)');
+    err.status = 401;
+    throw err;
+  }
   // Xeno-Canto: query nimmt Stichworte fuer Vogel-Name oder Gattung, plus
   // optional `q:A` (quality), `len:<5` (Dauer), `area:europe` etc.
   const parts = [query];
   if (durationMax) parts.push(`len:<${durationMax}`);
-  if (publishable) parts.push('lic:cc-by'); // CC0 separat schwer filterbar, wir filtern client-seitig nach
+  if (publishable) parts.push('lic:cc-by');
   const finalQuery = parts.join(' ');
 
-  const url = `${XENO}?query=${encodeURIComponent(finalQuery)}&page=${page}`;
-  const res = await proxiedFetch(url);
+  const url = `${XENO}?query=${encodeURIComponent(finalQuery)}&page=${page}&key=${encodeURIComponent(key)}`;
+  const res = await fetch(url);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const err = new Error(`Xeno-Canto ${res.status}: ${body.slice(0, 200)}`);
@@ -92,9 +96,10 @@ export async function search({ query, durationMax, publishable, page = 1, sort =
 }
 
 export async function searchTheme({
-  theme, queries, durationMax, publishable,
+  key, theme, queries, durationMax, publishable,
   target = 20, pages = null,
 }) {
+  if (!key) return [];
   const seen = new Set();
   const out = [];
   const pagesMap = pages ?? new Map();
@@ -103,7 +108,7 @@ export async function searchTheme({
     const page = (pagesMap.get(q) ?? 0) + 1;
     pagesMap.set(q, page);
     try {
-      const batch = await search({ query: q, durationMax, publishable, page });
+      const batch = await search({ key, query: q, durationMax, publishable, page });
       for (const s of batch) {
         if (!s.audioUrl) continue;
         if (seen.has(s.sourceId)) continue;
@@ -112,7 +117,7 @@ export async function searchTheme({
         if (out.length >= target) break;
       }
     } catch (err) {
-      if (err.status === 429) throw err;
+      if (err.status === 429 || err.status === 401) throw err;
       console.warn(`Xeno-Canto-Suche fehlgeschlagen "${q}" (page ${page}):`, err.message);
     }
   }
