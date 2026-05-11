@@ -164,15 +164,26 @@ async function loadMore({ filter = null, query = null } = {}) {
   if (themeKey === STRUDEL_THEME_KEY) {
     try {
       const fresh = await getStrudelSamplesAsync(themeKey);
+      const effectiveFilter = filter ?? get('stackFilter');
+      const queueIds = new Set(get('queue').map((q) => q.id));
       const filtered = [];
       for (const f of fresh) {
+        // Dedup gegen Queue — schon im Stack? skip.
+        if (queueIds.has(f.id)) continue;
         const existing = await getSample(f.id);
+        // Stack-Filter beruecksichtigen
+        if (effectiveFilter === 'neu' && existing && existing.status !== 'neu') continue;
+        if (effectiveFilter === 'mittel' && (!existing || existing.status !== 'mittel')) continue;
         const merged = await rememberSample({ ...f, status: existing?.status ?? 'neu' });
-        if ((filter ?? get('stackFilter')) === 'neu' && existing && existing.status !== 'neu') continue;
         filtered.push(merged);
+        queueIds.add(f.id);
       }
       set('queue', [...get('queue'), ...filtered]);
-      showToast(`${filtered.length} Strudel-Patterns geladen.`, 3000);
+      if (filtered.length === 0) {
+        showToast(`Strudel-Korpus erschoepft (${fresh.length} Patterns, alle schon im Stack).`, 4000);
+      } else {
+        showToast(`${filtered.length} Strudel-Patterns geladen.`, 3000);
+      }
       return filtered;
     } finally {
       isLoadingMore = false;
@@ -268,10 +279,16 @@ async function loadMore({ filter = null, query = null } = {}) {
 
     // Re-Anzeige als Marker statt Filter: nicht nur 'neu', sondern Status mit
     // beruecksichtigen je nach Stack-Filter.
+    // Dedup-Set: schon-in-Queue-IDs, damit "Mehr laden" nicht dieselben
+    // Samples zweimal in den Stack legt (war ein Befund S-089).
+    const queueIds = new Set(get('queue').map((q) => q.id));
     const filtered = [];
+    let skippedDupes = 0;
     for (const f of fresh) {
       // Audio-Samples brauchen audioUrl; Code-Samples brauchen patternCode.
       if (!f.audioUrl && !f.patternCode) continue;
+      // Dedup gegen Queue
+      if (queueIds.has(f.id)) { skippedDupes++; continue; }
       const existing = await getSample(f.id);
       // 'neu' = nur unbewertete
       if (effectiveFilter === 'neu' && existing && existing.status !== 'neu') continue;
@@ -284,6 +301,10 @@ async function loadMore({ filter = null, query = null } = {}) {
         status: existing?.status ?? f.status ?? 'neu',
       });
       filtered.push(merged);
+      queueIds.add(f.id);
+    }
+    if (skippedDupes > 0) {
+      console.info(`loadMore: ${skippedDupes} bereits-im-Stack-Duplikate verworfen`);
     }
 
     // Mittel-Re-Audition: zusaetzlich bestehende Mittel-Samples mit aufnehmen

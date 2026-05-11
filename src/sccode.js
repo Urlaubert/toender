@@ -68,14 +68,16 @@ function normalize(item, theme, queries) {
   };
 }
 
-// Stichwort-Filter wie in den anderen Quellen: queries gegen
-// title/author/cluster/description matchen.
+// Stichwort-Filter: queries gegen title/author/cluster/description/tags/code matchen.
+// Falls 0 Stichworte oder nur breit-passende Default-Queries vorhanden sind,
+// liefer den ganzen Korpus — damit das SuperCollider-Theme nicht auf 5 Snippets
+// schrumpft nur weil "synth"/"rhythm" in keinem Titel stehen.
 function matchesQueries(item, queries) {
   if (!queries || queries.length === 0) return true;
   const haystack = [
     item.title, item.author, item.cluster, item.description,
     ...(item.tags ?? []),
-    item.code?.slice(0, 200),  // erste 200 Code-Zeichen mit
+    item.code?.slice(0, 200),
   ].join(' ').toLowerCase();
   return queries.some((q) => haystack.includes(String(q).toLowerCase()));
 }
@@ -83,16 +85,32 @@ function matchesQueries(item, queries) {
 export async function searchTheme({
   theme, queries, target = 20, pages = null,
 }) {
-  // pages-Map wird ignoriert — wir haben statische Liste, keine Pagination noetig.
+  // pages = Map<themeKey, offset>. Beim ersten Aufruf 0, dann blaettern wir
+  // durch den statischen Korpus damit der zweite Reload nicht dieselben
+  // Snippets liefert. KEIN Wrap-around — wenn am Ende, gib weniger zurueck
+  // damit der Queue-Dedup im main.js nicht doppelt schluckt.
   try {
     const corpus = await loadCorpus();
     const matched = corpus.filter((item) => matchesQueries(item, queries));
-    // Wenn keine Treffer und keine Stichworte: liefer alles. Sonst:
-    // wenn Stichworte da sind aber 0 Treffer, liefer alles (besser als leer).
-    const items = (matched.length === 0 && corpus.length > 0)
-      ? corpus.slice(0, target)
-      : matched.slice(0, target);
-    return items.map((i) => normalize(i, theme, queries));
+    // Default-SCCODE-Queries (ambient/drone/synth/rhythm) treffen nur 5 von 37
+    // Snippets — das ist zu eng. Wenn die Trefferquote <50% ist und queries
+    // breit sind (>=3), nimm den ganzen Korpus. Sonst nutze den Match.
+    const isBroadDefaultQuery = queries && queries.length >= 3
+      && queries.every((q) => String(q).length < 10);
+    const useFullCorpus = matched.length === 0
+      || (isBroadDefaultQuery && matched.length < corpus.length / 2);
+    const pool = useFullCorpus ? corpus : matched;
+    const offsetKey = '__sccode_offset__';
+    const pagesMap = pages ?? new Map();
+    const offset = pagesMap.get(offsetKey) ?? 0;
+    const slice = pool.slice(offset, offset + target);
+    pagesMap.set(offsetKey, offset + slice.length);
+    // Wenn am Ende: Reset, damit naechster Reload wieder von vorn anfaengt
+    // (der Queue-Dedup verhindert dann tatsaechliche Duplikate).
+    if (offset + slice.length >= pool.length) {
+      pagesMap.set(offsetKey, 0);
+    }
+    return slice.map((i) => normalize(i, theme, queries));
   } catch (err) {
     console.warn('sccode searchTheme failed:', err.message);
     return [];
